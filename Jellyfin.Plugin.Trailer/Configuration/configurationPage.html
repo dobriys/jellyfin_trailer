@@ -180,7 +180,7 @@
           (function () {
             var u = window.location.origin + '/web/configurationpage?name=trailerPlugin_js';
             document.getElementById('NginxSnippet').textContent =
-              "sub_filter '</head>'\n  '<script src=\"" + u + "\"></scr' + 'ipt></head>';\nsub_filter_once on;\nsub_filter_types text/html;";
+              "sub_filter '</head>'\n  '<script src=\"" + u + "\"></" + "script></head>';\nsub_filter_once on;\nsub_filter_types text/html;";
           }());
         </script>
       </div>
