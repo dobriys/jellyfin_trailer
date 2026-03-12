@@ -52,7 +52,17 @@
       "Bash(GIT_AUTHOR_NAME=\"dobriys\" GIT_AUTHOR_EMAIL=\"dobriys@users.noreply.github.com\" GIT_COMMITTER_NAME=\"dobriys\" GIT_COMMITTER_EMAIL=\"dobriys@users.noreply.github.com\" git commit -m \"feat: initial release — Jellyfin Trailer Plugin v1.0.0.0\")",
       "Bash(git -C /Volumes/Adata/guthub/jellyfin_trailer commit -c user.name=dobriys -c user.email=dobriys@users.noreply.github.com -m \"feat: initial release — Jellyfin Trailer Plugin v1.0.0.0\")",
       "Bash(git -C /Volumes/Adata/guthub/jellyfin_trailer -c user.name=dobriys -c user.email=dobriys@users.noreply.github.com commit -m \"feat: initial release — Jellyfin Trailer Plugin v1.0.0.0\")",
-      "Bash(git -C /Volumes/Adata/guthub/jellyfin_trailer log --oneline -5)"
+      "Bash(git -C /Volumes/Adata/guthub/jellyfin_trailer log --oneline -5)",
+      "Bash(gh auth:*)",
+      "Bash(REPO_URL=https://github.com/dobriys/jellyfin_trailer bash package.sh --update-manifest)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(sed -i '' 's/<Version>1.0.1.0<\\\\/Version>/<Version>1.0.2.0<\\\\/Version>/' /Volumes/Adata/guthub/jellyfin_trailer/Jellyfin.Plugin.Trailer/Jellyfin.Plugin.Trailer.csproj)",
+      "Bash(sed -i '' 's/<AssemblyVersion>1.0.1.0<\\\\/AssemblyVersion>/<AssemblyVersion>1.0.2.0<\\\\/AssemblyVersion>/' /Volumes/Adata/guthub/jellyfin_trailer/Jellyfin.Plugin.Trailer/Jellyfin.Plugin.Trailer.csproj)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(sed -i '' 's/<Version>1.0.2.0<\\\\/Version>/<Version>1.0.3.0<\\\\/Version>/' /Volumes/Adata/guthub/jellyfin_trailer/Jellyfin.Plugin.Trailer/Jellyfin.Plugin.Trailer.csproj)",
+      "Bash(sed -i '' 's/<AssemblyVersion>1.0.2.0<\\\\/AssemblyVersion>/<AssemblyVersion>1.0.3.0<\\\\/AssemblyVersion>/' /Volumes/Adata/guthub/jellyfin_trailer/Jellyfin.Plugin.Trailer/Jellyfin.Plugin.Trailer.csproj)"
     ]
   }
 }
