@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Jellyfin.Plugin.Trailer</AssemblyName>
+    <RootNamespace>Jellyfin.Plugin.Trailer</RootNamespace>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Version>1.0.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      ExcludeAssets="runtime" is CRITICAL: prevents Jellyfin's own DLLs
+      from being bundled into the plugin ZIP, which would cause type
+      conflicts when the plugin is loaded by the server.
+    -->
+    <PackageReference Include="Jellyfin.Controller" Version="10.10.7">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="10.10.7">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <!--
+      IHttpClientFactory support. Not part of Jellyfin's runtime assemblies,
+      so does NOT need ExcludeAssets.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Admin configuration page served via IHasWebPages -->
+    <EmbeddedResource Include="Configuration\configurationPage.html" />
+    <!-- Client-side JavaScript served via IHasWebPages -->
+    <EmbeddedResource Include="Web\trailerPlugin.js" />
+  </ItemGroup>
+
+</Project>

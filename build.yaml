@@ -1,0 +1,39 @@
+---
+# Jellyfin plugin build metadata.
+# Used by update_manifest.py and the GitHub Actions release workflow.
+
+name:     "Trailer"
+guid:     "70788050-9f96-453d-a823-f41b7bd12712"
+version:  "1.0.0.0"
+
+# Minimum Jellyfin server version this plugin is compatible with.
+# Must match the Jellyfin.Controller NuGet version used in the .csproj.
+targetAbi: "10.10.0.0"
+
+framework: "net8.0"
+
+overview: "Кнопка «Трейлер» на страницах фильмов — смотрите YouTube-трейлеры прямо в Jellyfin"
+
+description: |
+  Добавляет кнопку «Трейлер» на страницу каждого фильма в вашей библиотеке.
+  Трейлер воспроизводится во встроенном плеере прямо в интерфейсе Jellyfin
+  (или в новой вкладке — на ваш выбор).
+
+  Источники трейлеров:
+    • TMDb (themoviedb.org) — основной источник, поддержка русского и английского языков
+    • Kinopoisk Unofficial API — запасной вариант для российских фильмов
+
+  Настройки:
+    • TMDb API Key (v3)
+    • Kinopoisk Unofficial API Key
+    • Предпочтительный язык трейлера
+    • Режим воспроизведения: встроенный плеер или новая вкладка
+    • Кэширование результатов
+
+category: "General"
+owner:    "dobriys"
+
+artifacts:
+  - "Jellyfin.Plugin.Trailer.dll"
+
+changelog: "Initial release — встроенный YouTube плеер в Jellyfin"

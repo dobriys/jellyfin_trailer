@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Trailer Plugin</title>
+</head>
+<body>
+<div id="TrailerConfigPage"
+     data-role="page"
+     class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-select,emby-checkbox">
+  <div data-role="content">
+    <div class="content-primary">
+
+      <div class="verticalSection">
+        <h2 class="sectionTitle">Trailer Plugin — Настройки</h2>
+        <p>
+          Плагин добавляет кнопку <strong>Трейлер</strong> на страницу фильма.
+          Трейлер можно смотреть прямо внутри Jellyfin или открывать на YouTube.
+        </p>
+      </div>
+
+      <form id="TrailerConfigForm">
+
+        <!-- ── Режим плеера ───────────────────────────────────────────────── -->
+        <div class="verticalSection">
+          <h3 class="sectionTitle">Режим воспроизведения</h3>
+
+          <div class="selectContainer">
+            <label class="selectLabel" for="PlayerMode">Куда открывать трейлер</label>
+            <select id="PlayerMode" is="emby-select" class="emby-select">
+              <option value="modal">Внутри Jellyfin (встроенный плеер)</option>
+              <option value="tab">В новой вкладке (YouTube)</option>
+            </select>
+            <div class="fieldDescription">
+              <strong>Встроенный плеер</strong> — трейлер воспроизводится в наложении поверх интерфейса
+              без ухода с сайта. <strong>Новая вкладка</strong> — открывает YouTube в браузере.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TMDb ──────────────────────────────────────────────────────── -->
+        <div class="verticalSection">
+          <h3 class="sectionTitle">TMDb</h3>
+
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">
+              TMDb API Key (v3)
+            </label>
+            <input id="TmdbApiKey" type="password" is="emby-input" class="emby-input" />
+            <div class="fieldDescription">
+              Получить ключ: <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">
+              themoviedb.org/settings/api</a>. Используется для поиска трейлеров на YouTube.
+            </div>
+          </div>
+
+          <div class="selectContainer">
+            <label class="selectLabel" for="PreferredLanguage">Приоритетный язык трейлера</label>
+            <select id="PreferredLanguage" is="emby-select" class="emby-select">
+              <option value="ru-RU">Русский (ru-RU)</option>
+              <option value="en-US">English (en-US)</option>
+              <option value="uk-UA">Українська (uk-UA)</option>
+            </select>
+          </div>
+
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label>
+              <input id="FallbackToEnglish" type="checkbox" is="emby-checkbox" class="emby-checkbox" />
+              <span>Если нет трейлера на выбранном языке — искать на английском</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- ── Kinopoisk ──────────────────────────────────────────────────── -->
+        <div class="verticalSection">
+          <h3 class="sectionTitle">Kinopoisk (запасной источник)</h3>
+
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label>
+              <input id="EnableKinopoisk" type="checkbox" is="emby-checkbox" class="emby-checkbox" />
+              <span>Включить Kinopoisk как запасной источник трейлеров</span>
+            </label>
+            <div class="fieldDescription">
+              Используется только если TMDb не вернул результат.
+            </div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="KinopoiskApiKey">
+              Kinopoisk Unofficial API Key
+            </label>
+            <input id="KinopoiskApiKey" type="password" is="emby-input" class="emby-input" />
+            <div class="fieldDescription">
+              Бесплатный токен: <a href="https://kinopoiskapiunofficial.tech" target="_blank" rel="noopener">
+              kinopoiskapiunofficial.tech</a>.
+              <strong>Внимание:</strong> неофициальный API, работоспособность не гарантирована.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Cache ─────────────────────────────────────────────────────── -->
+        <div class="verticalSection">
+          <h3 class="sectionTitle">Кэширование</h3>
+
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="CacheDurationMinutes">
+              Время кэширования (минуты)
+            </label>
+            <input id="CacheDurationMinutes" type="number" is="emby-input" class="emby-input"
+                   min="0" max="1440" step="5" />
+            <div class="fieldDescription">
+              Результаты хранятся в памяти. 0 — отключить кэш. При перезапуске Jellyfin кэш сбрасывается.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── JavaScript injection ──────────────────────────────────────── -->
+        <div class="verticalSection">
+          <h3 class="sectionTitle">Подключение кнопки в интерфейс</h3>
+          <p>
+            Кнопка <strong>Трейлер</strong> добавляется через JavaScript.
+            Скопируйте строку ниже и вставьте её в плагин
+            <a href="#!/configurationpage?name=CustomJavascript" target="_blank">Custom JavaScript</a>
+            (необходимо установить его отдельно).
+          </p>
+
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="JsLoader">Loader-скрипт</label>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="JsLoader"
+                     type="text"
+                     is="emby-input"
+                     class="emby-input"
+                     readonly
+                     style="font-family:monospace;font-size:0.8em;" />
+              <button type="button"
+                      is="emby-button"
+                      class="raised button-submit"
+                      onclick="TrailerPluginConfig.copyLoader()">
+                Копировать
+              </button>
+            </div>
+            <div class="fieldDescription">
+              Если плагин Custom JavaScript не установлен, скрипт можно добавить
+              в <strong>Nginx/Caddy</strong> как инъекцию в <code>&lt;head&gt;</code>.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Actions ───────────────────────────────────────────────────── -->
+        <div>
+          <button is="emby-button" type="submit" class="raised button-submit block">
+            Сохранить
+          </button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+</div>
+
+<script type="text/javascript">
+  /* global Dashboard, ApiClient */
+
+  var TrailerPluginConfig = {
+    pluginId: '70788050-9f96-453d-a823-f41b7bd12712',
+
+    loadConfiguration: function () {
+      Dashboard.showLoadingMsg();
+      ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
+        document.getElementById('TmdbApiKey').value        = config.TmdbApiKey || '';
+        document.getElementById('KinopoiskApiKey').value   = config.KinopoiskApiKey || '';
+        document.getElementById('PreferredLanguage').value = config.PreferredLanguage || 'ru-RU';
+        document.getElementById('PlayerMode').value        = config.PlayerMode || 'modal';
+        document.getElementById('FallbackToEnglish').checked = config.FallbackToEnglish !== false;
+        document.getElementById('EnableKinopoisk').checked   = config.EnableKinopoisk !== false;
+        document.getElementById('CacheDurationMinutes').value =
+          config.CacheDurationMinutes !== undefined ? config.CacheDurationMinutes : 60;
+
+        // Build and display the JS loader snippet
+        var origin = window.location.origin;
+        var loaderSnippet =
+          "(function(){var s=document.createElement('script');" +
+          "s.src='" + origin + "/web/configurationpage?name=trailerPlugin_js';" +
+          "document.head.appendChild(s);" +
+          "})();";
+        document.getElementById('JsLoader').value = loaderSnippet;
+
+        Dashboard.hideLoadingMsg();
+      });
+    },
+
+    saveConfiguration: function (e) {
+      e.preventDefault();
+      Dashboard.showLoadingMsg();
+      ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
+        config.TmdbApiKey            = document.getElementById('TmdbApiKey').value.trim();
+        config.KinopoiskApiKey       = document.getElementById('KinopoiskApiKey').value.trim();
+        config.PreferredLanguage     = document.getElementById('PreferredLanguage').value;
+        config.PlayerMode            = document.getElementById('PlayerMode').value;
+        config.FallbackToEnglish     = document.getElementById('FallbackToEnglish').checked;
+        config.EnableKinopoisk       = document.getElementById('EnableKinopoisk').checked;
+        config.CacheDurationMinutes  = parseInt(
+          document.getElementById('CacheDurationMinutes').value, 10) || 60;
+
+        ApiClient.updatePluginConfiguration(TrailerPluginConfig.pluginId, config).then(function () {
+          Dashboard.hideLoadingMsg();
+          Dashboard.alert('Настройки сохранены.');
+        });
+      });
+    },
+
+    copyLoader: function () {
+      var input = document.getElementById('JsLoader');
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(input.value).then(function () {
+          Dashboard.alert('Скопировано в буфер обмена.');
+        });
+      } else {
+        input.select();
+        document.execCommand('copy');
+        Dashboard.alert('Скопировано в буфер обмена.');
+      }
+    }
+  };
+
+  document.getElementById('TrailerConfigForm')
+    .addEventListener('submit', TrailerPluginConfig.saveConfiguration);
+
+  // Jellyfin calls this when the page becomes visible
+  document.addEventListener('viewshow', function () {
+    TrailerPluginConfig.loadConfiguration();
+  });
+</script>
+</body>
+</html>

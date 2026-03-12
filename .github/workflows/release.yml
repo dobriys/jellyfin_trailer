@@ -1,0 +1,156 @@
+name: Release Plugin
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Triggers:
+#   Push a tag like  v1.0.0.0  →  full release pipeline
+#   Manual dispatch  →  same pipeline (useful for re-running)
+#
+# What it does:
+#   1. Build Release DLL
+#   2. Pack into  Jellyfin.Plugin.Trailer_<version>.zip
+#   3. Create GitHub Release and upload the zip as an asset
+#   4. Compute MD5 checksum
+#   5. Update dist/manifest.json with the new version entry
+#   6. Commit & push manifest.json back to the repository
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    tags:
+      - "v*.*.*.*"       # e.g. v1.0.0.0
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag (e.g. v1.0.0.0)"
+        required: true
+
+permissions:
+  contents: write   # needed to create releases and push commits
+
+jobs:
+  release:
+    name: Build & Publish
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so we can push back the manifest commit
+
+      # ── 2. Set up .NET ───────────────────────────────────────────────────────
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # ── 3. Derive version string ─────────────────────────────────────────────
+      - name: Derive version
+        id: vars
+        run: |
+          # If triggered by tag: use the tag; if manual: use the input
+          TAG="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          fi
+          # Strip leading "v"
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}"         >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "zip=Jellyfin.Plugin.Trailer_${VERSION}.zip" >> "$GITHUB_OUTPUT"
+
+      # ── 4. Restore & Build ───────────────────────────────────────────────────
+      - name: Restore dependencies
+        run: dotnet restore Jellyfin.Plugin.Trailer/Jellyfin.Plugin.Trailer.csproj
+
+      - name: Build Release
+        run: |
+          dotnet build Jellyfin.Plugin.Trailer/Jellyfin.Plugin.Trailer.csproj \
+            -c Release \
+            --no-restore \
+            --nologo \
+            -p:Version=${{ steps.vars.outputs.version }} \
+            -p:AssemblyVersion=${{ steps.vars.outputs.version }}
+
+      # ── 5. Package into zip ──────────────────────────────────────────────────
+      - name: Create plugin zip
+        run: |
+          BUILD_DIR="Jellyfin.Plugin.Trailer/bin/Release/net8.0"
+          ZIP="${{ steps.vars.outputs.zip }}"
+          # Include XML docs if present
+          if [ -f "${BUILD_DIR}/Jellyfin.Plugin.Trailer.xml" ]; then
+            zip -j "$ZIP" \
+              "${BUILD_DIR}/Jellyfin.Plugin.Trailer.dll" \
+              "${BUILD_DIR}/Jellyfin.Plugin.Trailer.xml"
+          else
+            zip -j "$ZIP" "${BUILD_DIR}/Jellyfin.Plugin.Trailer.dll"
+          fi
+          echo "Zip created: $(ls -lh $ZIP)"
+
+      # ── 6. Compute MD5 ───────────────────────────────────────────────────────
+      - name: Compute MD5 checksum
+        id: md5
+        run: |
+          ZIP="${{ steps.vars.outputs.zip }}"
+          CHECKSUM=$(md5sum "$ZIP" | awk '{print $1}')
+          echo "checksum=${CHECKSUM}" >> "$GITHUB_OUTPUT"
+          echo "MD5: ${CHECKSUM}"
+
+      # ── 7. Create GitHub Release and upload asset ────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "Trailer Plugin ${{ steps.vars.outputs.version }}"
+          body: |
+            ## Jellyfin Trailer Plugin ${{ steps.vars.outputs.version }}
+
+            ### Установка через репозиторий плагинов
+            Добавьте в Jellyfin → Dashboard → Plugins → Repositories:
+            ```
+            https://raw.githubusercontent.com/${{ github.repository }}/main/dist/manifest.json
+            ```
+            Затем найдите плагин **Trailer** в каталоге и нажмите Install.
+
+            ### Ручная установка
+            Скачайте `${{ steps.vars.outputs.zip }}`, распакуйте в папку плагинов Jellyfin и перезапустите сервер.
+
+            **MD5:** `${{ steps.md5.outputs.checksum }}`
+          files: ${{ steps.vars.outputs.zip }}
+          draft: false
+          prerelease: false
+
+      # ── 8. Build asset URL ───────────────────────────────────────────────────
+      - name: Build asset URL
+        id: asset
+        run: |
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.vars.outputs.tag }}/${{ steps.vars.outputs.zip }}"
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "Asset URL: ${URL}"
+
+      # ── 9. Update dist/manifest.json ─────────────────────────────────────────
+      - name: Update manifest.json
+        run: |
+          python3 update_manifest.py \
+            "${{ steps.vars.outputs.version }}" \
+            "${{ steps.md5.outputs.checksum }}" \
+            "${{ steps.asset.outputs.url }}"
+
+      # ── 10. Commit & push manifest ───────────────────────────────────────────
+      - name: Commit updated manifest
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add dist/manifest.json
+          git diff --staged --quiet && echo "No manifest changes to commit" && exit 0
+
+          git commit -m "chore: update manifest for v${{ steps.vars.outputs.version }} [skip ci]"
+
+          # Push to the branch that was checked out (usually main/master)
+          # We push to HEAD so this works regardless of branch name
+          git push origin HEAD:${{ github.ref_name }} 2>/dev/null || \
+          git push origin HEAD:main 2>/dev/null || \
+          git push origin HEAD:master

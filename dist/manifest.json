@@ -1,0 +1,21 @@
+[
+  {
+    "category": "General",
+    "guid": "70788050-9f96-453d-a823-f41b7bd12712",
+    "name": "Trailer",
+    "overview": "Кнопка «Трейлер» на страницах фильмов — смотрите YouTube-трейлеры прямо в Jellyfin",
+    "owner": "dobriys",
+    "description": "Добавляет кнопку «Трейлер» на страницу каждого фильма. Трейлер воспроизводится во встроенном плеере прямо в интерфейсе Jellyfin (или в новой вкладке — на ваш выбор). Источники: TMDb (основной) и Kinopoisk (запасной).",
+    "imageUrl": "",
+    "versions": [
+      {
+        "version": "1.0.0.0",
+        "checksum": "07343062a405a001a4abffc32f2d872a",
+        "changelog": "Initial release — встроенный YouTube плеер в Jellyfin",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/dobriys/jellyfin_trailer/releases/download/v1.0.0.0/Jellyfin.Plugin.Trailer_1.0.0.0.zip",
+        "timestamp": "2026-03-12T16:38:03Z"
+      }
+    ]
+  }
+]
