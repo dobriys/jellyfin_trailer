@@ -227,10 +227,11 @@
     removeExistingButton();
 
     var selectors = [
+      '.mainDetailButtons',
+      '.mainDetailButtons.focuscontainer-x',
       '.itemDetailPage .itemActions',
       '#itemDetailPage .itemActions',
       '.detailPageContent .itemActions',
-      '.mainDetailButtons',
       '.detailRibbonButtons',
       '.itemDetailPage .detailSectionContent .itemActions'
     ];
@@ -321,7 +322,15 @@
     if (!itemId || itemId === lastItemId) return;
     lastItemId = itemId;
 
-    waitForElement('.itemActions', WAIT_TIMEOUT_MS, function () {
+    // Try multiple selectors — different Jellyfin versions use different class names
+    var containerSel = [
+      '.mainDetailButtons',
+      '.itemActions',
+      '.detailPageContent .itemActions',
+      '.mainDetailButtons.focuscontainer-x'
+    ].find(function (s) { return !!document.querySelector(s); }) || '.mainDetailButtons';
+
+    waitForElement(containerSel, WAIT_TIMEOUT_MS, function () {
       if (getItemIdFromHash() === itemId) {
         fetchAndInject(itemId);
       }
