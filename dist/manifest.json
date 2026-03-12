@@ -10,11 +10,11 @@
     "versions": [
       {
         "version": "1.0.0.0",
-        "checksum": "07343062a405a001a4abffc32f2d872a",
+        "checksum": "783dded62f257188da00b770f9cc5566",
         "changelog": "Initial release — встроенный YouTube плеер в Jellyfin",
         "targetAbi": "10.10.0.0",
         "sourceUrl": "https://github.com/dobriys/jellyfin_trailer/releases/download/v1.0.0.0/Jellyfin.Plugin.Trailer_1.0.0.0.zip",
-        "timestamp": "2026-03-12T16:38:03Z"
+        "timestamp": "2026-03-12T16:59:28Z"
       }
     ]
   }
