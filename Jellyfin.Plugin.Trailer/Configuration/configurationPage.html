@@ -140,14 +140,12 @@
           </div>
 
           <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="CustomJsContent">Содержимое custom.js</label>
+            <label class="inputLabel inputLabelUnfocused">Содержимое custom.js</label>
             <div style="display:flex;gap:8px;align-items:flex-start;">
-              <textarea id="CustomJsContent"
-                        is="emby-textarea"
-                        class="emby-textarea"
-                        readonly
-                        rows="3"
-                        style="font-family:monospace;font-size:0.8em;resize:none;flex:1;"></textarea>
+              <pre id="CustomJsContent"
+                   style="flex:1;margin:0;padding:10px;background:#1a1a1a;color:#e0e0e0;
+                          font-family:monospace;font-size:0.82em;border-radius:4px;
+                          white-space:pre-wrap;word-break:break-all;user-select:all;"></pre>
               <button type="button"
                       is="emby-button"
                       class="raised button-submit"
@@ -166,14 +164,12 @@
           </div>
 
           <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="NginxSnippet">Nginx-конфиг</label>
+            <label class="inputLabel inputLabelUnfocused">Nginx-конфиг</label>
             <div style="display:flex;gap:8px;align-items:flex-start;">
-              <textarea id="NginxSnippet"
-                        is="emby-textarea"
-                        class="emby-textarea"
-                        readonly
-                        rows="4"
-                        style="font-family:monospace;font-size:0.8em;resize:none;flex:1;"></textarea>
+              <pre id="NginxSnippet"
+                   style="flex:1;margin:0;padding:10px;background:#1a1a1a;color:#e0e0e0;
+                          font-family:monospace;font-size:0.82em;border-radius:4px;
+                          white-space:pre-wrap;word-break:break-all;user-select:all;"></pre>
               <button type="button"
                       is="emby-button"
                       class="raised button-submit"
@@ -213,25 +209,6 @@
         document.getElementById('EnableKinopoisk').checked   = config.EnableKinopoisk !== false;
         document.getElementById('CacheDurationMinutes').value =
           config.CacheDurationMinutes !== undefined ? config.CacheDurationMinutes : 60;
-
-        // Build snippets using current server origin
-        var origin = window.location.origin;
-        var scriptUrl = origin + '/web/configurationpage?name=trailerPlugin_js';
-
-        // custom.js content
-        document.getElementById('CustomJsContent').value =
-          "(function(){\n" +
-          "  var s = document.createElement('script');\n" +
-          "  s.src = '" + scriptUrl + "';\n" +
-          "  document.head.appendChild(s);\n" +
-          "})();";
-
-        // Nginx snippet
-        document.getElementById('NginxSnippet').value =
-          "sub_filter '</head>'\n" +
-          "  '<script src=\"" + scriptUrl + "\"></script></head>';\n" +
-          "sub_filter_once on;\n" +
-          "sub_filter_types text/html;";
 
         Dashboard.hideLoadingMsg();
       });
@@ -282,18 +259,40 @@
     },
 
     copyCustomJs: function () {
-      TrailerPluginConfig.copyText(document.getElementById('CustomJsContent').value);
+      TrailerPluginConfig.copyText(document.getElementById('CustomJsContent').textContent);
     },
 
     copyNginx: function () {
-      TrailerPluginConfig.copyText(document.getElementById('NginxSnippet').value);
+      TrailerPluginConfig.copyText(document.getElementById('NginxSnippet').textContent);
+    },
+
+    // Заполняем сниппеты сразу — не зависим от событий Jellyfin
+    fillSnippets: function () {
+      var origin = window.location.origin;
+      var scriptUrl = origin + '/web/configurationpage?name=trailerPlugin_js';
+
+      document.getElementById('CustomJsContent').textContent =
+        "(function(){\n" +
+        "  var s = document.createElement('script');\n" +
+        "  s.src = '" + scriptUrl + "';\n" +
+        "  document.head.appendChild(s);\n" +
+        "})();";
+
+      document.getElementById('NginxSnippet').textContent =
+        "sub_filter '</head>'\n" +
+        "  '<script src=\"" + scriptUrl + "\"></script></head>';\n" +
+        "sub_filter_once on;\n" +
+        "sub_filter_types text/html;";
     }
   };
 
   document.getElementById('TrailerConfigForm')
     .addEventListener('submit', TrailerPluginConfig.saveConfiguration);
 
-  // Jellyfin вызывает pageshow на элементе страницы при каждом показе
+  // Сниппеты — заполняем немедленно, URL известен без API
+  TrailerPluginConfig.fillSnippets();
+
+  // Конфиг из сервера — ждём pageshow
   document.querySelector('#TrailerConfigPage').addEventListener('pageshow', function () {
     TrailerPluginConfig.loadConfiguration();
   });
