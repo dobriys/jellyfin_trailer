@@ -117,31 +117,67 @@
         <div class="verticalSection">
           <h3 class="sectionTitle">Подключение кнопки в интерфейс</h3>
           <p>
-            Кнопка <strong>Трейлер</strong> добавляется через JavaScript.
-            Скопируйте строку ниже и вставьте её в плагин
-            <a href="#!/configurationpage?name=CustomJavascript" target="_blank">Custom JavaScript</a>
-            (необходимо установить его отдельно).
+            Кнопка <strong>Трейлер</strong> добавляется через JavaScript-файл.
+            Выберите способ подключения в зависимости от вашей установки Jellyfin.
           </p>
 
+          <!-- Способ 1: custom.js -->
+          <div style="margin-bottom:16px;">
+            <strong>Способ 1 — файл custom.js (рекомендуется)</strong>
+            <div class="fieldDescription" style="margin-top:4px;">
+              Создайте файл <code>custom.js</code> в папке веб-интерфейса Jellyfin
+              и вставьте в него содержимое ниже. Jellyfin загружает этот файл автоматически.
+              <br><br>
+              Пути к файлу:
+              <ul style="margin:6px 0 0 16px;line-height:1.8;">
+                <li><strong>Docker:</strong> <code>/jellyfin/jellyfin-web/custom.js</code> (или смонтированная папка)</li>
+                <li><strong>Linux (apt/rpm):</strong> <code>/usr/share/jellyfin/web/custom.js</code></li>
+                <li><strong>Windows:</strong> <code>C:\Program Files\Jellyfin\Server\jellyfin-web\custom.js</code></li>
+              </ul>
+            </div>
+          </div>
+
           <div class="inputContainer">
-            <label class="inputLabel inputLabelUnfocused" for="JsLoader">Loader-скрипт</label>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <input id="JsLoader"
-                     type="text"
-                     is="emby-input"
-                     class="emby-input"
-                     readonly
-                     style="font-family:monospace;font-size:0.8em;" />
+            <label class="inputLabel inputLabelUnfocused" for="CustomJsContent">Содержимое custom.js</label>
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <textarea id="CustomJsContent"
+                        is="emby-textarea"
+                        class="emby-textarea"
+                        readonly
+                        rows="3"
+                        style="font-family:monospace;font-size:0.8em;resize:none;flex:1;"></textarea>
               <button type="button"
                       is="emby-button"
                       class="raised button-submit"
-                      onclick="TrailerPluginConfig.copyLoader()">
+                      onclick="TrailerPluginConfig.copyCustomJs()">
                 Копировать
               </button>
             </div>
-            <div class="fieldDescription">
-              Если плагин Custom JavaScript не установлен, скрипт можно добавить
-              в <strong>Nginx/Caddy</strong> как инъекцию в <code>&lt;head&gt;</code>.
+          </div>
+
+          <!-- Способ 2: Nginx -->
+          <div style="margin:16px 0 8px;">
+            <strong>Способ 2 — Nginx (если используется как reverse proxy)</strong>
+            <div class="fieldDescription" style="margin-top:4px;">
+              Добавьте в конфигурацию Nginx директиву <code>sub_filter</code>:
+            </div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel inputLabelUnfocused" for="NginxSnippet">Nginx-конфиг</label>
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <textarea id="NginxSnippet"
+                        is="emby-textarea"
+                        class="emby-textarea"
+                        readonly
+                        rows="4"
+                        style="font-family:monospace;font-size:0.8em;resize:none;flex:1;"></textarea>
+              <button type="button"
+                      is="emby-button"
+                      class="raised button-submit"
+                      onclick="TrailerPluginConfig.copyNginx()">
+                Копировать
+              </button>
             </div>
           </div>
         </div>
@@ -176,14 +212,24 @@
         document.getElementById('CacheDurationMinutes').value =
           config.CacheDurationMinutes !== undefined ? config.CacheDurationMinutes : 60;
 
-        // Build and display the JS loader snippet
+        // Build snippets using current server origin
         var origin = window.location.origin;
-        var loaderSnippet =
-          "(function(){var s=document.createElement('script');" +
-          "s.src='" + origin + "/web/configurationpage?name=trailerPlugin_js';" +
-          "document.head.appendChild(s);" +
+        var scriptUrl = origin + '/web/configurationpage?name=trailerPlugin_js';
+
+        // custom.js content
+        document.getElementById('CustomJsContent').value =
+          "(function(){\n" +
+          "  var s = document.createElement('script');\n" +
+          "  s.src = '" + scriptUrl + "';\n" +
+          "  document.head.appendChild(s);\n" +
           "})();";
-        document.getElementById('JsLoader').value = loaderSnippet;
+
+        // Nginx snippet
+        document.getElementById('NginxSnippet').value =
+          "sub_filter '</head>'\n" +
+          "  '<script src=\"" + scriptUrl + "\"></script></head>';\n" +
+          "sub_filter_once on;\n" +
+          "sub_filter_types text/html;";
 
         Dashboard.hideLoadingMsg();
       });
@@ -209,17 +255,28 @@
       });
     },
 
-    copyLoader: function () {
-      var input = document.getElementById('JsLoader');
+    copyText: function (text) {
       if (navigator.clipboard) {
-        navigator.clipboard.writeText(input.value).then(function () {
+        navigator.clipboard.writeText(text).then(function () {
           Dashboard.alert('Скопировано в буфер обмена.');
         });
       } else {
-        input.select();
+        var tmp = document.createElement('textarea');
+        tmp.value = text;
+        document.body.appendChild(tmp);
+        tmp.select();
         document.execCommand('copy');
+        document.body.removeChild(tmp);
         Dashboard.alert('Скопировано в буфер обмена.');
       }
+    },
+
+    copyCustomJs: function () {
+      TrailerPluginConfig.copyText(document.getElementById('CustomJsContent').value);
+    },
+
+    copyNginx: function () {
+      TrailerPluginConfig.copyText(document.getElementById('NginxSnippet').value);
     }
   };
 
