@@ -46,7 +46,8 @@
             <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">
               TMDb API Key (v3)
             </label>
-            <input id="TmdbApiKey" type="password" is="emby-input" class="emby-input" />
+            <input id="TmdbApiKey" type="text" is="emby-input" class="emby-input"
+                   autocomplete="off" spellcheck="false" />
             <div class="fieldDescription">
               Получить ключ: <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">
               themoviedb.org/settings/api</a>. Используется для поиска трейлеров на YouTube.
@@ -88,7 +89,8 @@
             <label class="inputLabel inputLabelUnfocused" for="KinopoiskApiKey">
               Kinopoisk Unofficial API Key
             </label>
-            <input id="KinopoiskApiKey" type="password" is="emby-input" class="emby-input" />
+            <input id="KinopoiskApiKey" type="text" is="emby-input" class="emby-input"
+                   autocomplete="off" spellcheck="false" />
             <div class="fieldDescription">
               Бесплатный токен: <a href="https://kinopoiskapiunofficial.tech" target="_blank" rel="noopener">
               kinopoiskapiunofficial.tech</a>.
@@ -238,20 +240,28 @@
     saveConfiguration: function (e) {
       e.preventDefault();
       Dashboard.showLoadingMsg();
-      ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
-        config.TmdbApiKey            = document.getElementById('TmdbApiKey').value.trim();
-        config.KinopoiskApiKey       = document.getElementById('KinopoiskApiKey').value.trim();
-        config.PreferredLanguage     = document.getElementById('PreferredLanguage').value;
-        config.PlayerMode            = document.getElementById('PlayerMode').value;
-        config.FallbackToEnglish     = document.getElementById('FallbackToEnglish').checked;
-        config.EnableKinopoisk       = document.getElementById('EnableKinopoisk').checked;
-        config.CacheDurationMinutes  = parseInt(
-          document.getElementById('CacheDurationMinutes').value, 10) || 60;
 
-        ApiClient.updatePluginConfiguration(TrailerPluginConfig.pluginId, config).then(function () {
-          Dashboard.hideLoadingMsg();
-          Dashboard.alert('Настройки сохранены.');
-        });
+      // Читаем текущий конфиг, патчим нужные поля, сохраняем
+      ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
+        config.TmdbApiKey           = document.getElementById('TmdbApiKey').value.trim();
+        config.KinopoiskApiKey      = document.getElementById('KinopoiskApiKey').value.trim();
+        config.PreferredLanguage    = document.getElementById('PreferredLanguage').value;
+        config.PlayerMode           = document.getElementById('PlayerMode').value;
+        config.FallbackToEnglish    = document.getElementById('FallbackToEnglish').checked;
+        config.EnableKinopoisk      = document.getElementById('EnableKinopoisk').checked;
+        config.CacheDurationMinutes = parseInt(
+          document.getElementById('CacheDurationMinutes').value, 10);
+        if (isNaN(config.CacheDurationMinutes) || config.CacheDurationMinutes < 0) {
+          config.CacheDurationMinutes = 60;
+        }
+
+        return ApiClient.updatePluginConfiguration(TrailerPluginConfig.pluginId, config);
+      }).then(function () {
+        Dashboard.processPluginConfigurationUpdateResult();
+      }).catch(function (err) {
+        console.error('[TrailerPlugin] save error', err);
+        Dashboard.hideLoadingMsg();
+        Dashboard.alert('Ошибка сохранения. Проверьте консоль браузера.');
       });
     },
 
@@ -283,8 +293,8 @@
   document.getElementById('TrailerConfigForm')
     .addEventListener('submit', TrailerPluginConfig.saveConfiguration);
 
-  // Jellyfin calls this when the page becomes visible
-  document.addEventListener('viewshow', function () {
+  // Jellyfin вызывает pageshow на элементе страницы при каждом показе
+  document.querySelector('#TrailerConfigPage').addEventListener('pageshow', function () {
     TrailerPluginConfig.loadConfiguration();
   });
 </script>
