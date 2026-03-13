@@ -40,15 +40,18 @@
 
   /**
    * Build embed URL for a YouTube video.
-   * Piped.video is primary — it's an open-source YouTube frontend
-   * that doesn't have embedding restrictions (no Error 153).
-   * YouTube embeds fail from non-HTTPS / local-IP origins.
+   * youtube-nocookie.com is primary (origin param removed to fix Error 153).
+   * Invidious instances as fallback — no embed restrictions at all.
    */
   var EMBED_HOSTS = [
-    'https://piped.video/embed/',
     'https://www.youtube-nocookie.com/embed/',
-    'https://www.youtube.com/embed/'
+    'https://inv.nadeko.net/embed/',
+    'https://invidious.nerdvpn.de/embed/',
+    'https://yewtu.be/embed/'
   ];
+
+  /** Seconds to wait before assuming embed failed and trying next host */
+  var EMBED_TIMEOUT_SEC = 6;
 
   function toEmbedUrl(videoId, hostIndex) {
     var idx = hostIndex || 0;
@@ -314,23 +317,59 @@
     playerWrap.className = 'trailer-player-wrap';
 
     var currentHostIdx = 0;
+    var embedTimer = null;
+
+    function tryNextHost() {
+      if (currentHostIdx < EMBED_HOSTS.length - 1) {
+        currentHostIdx++;
+        console.log('[TrailerPlugin] Trying embed host #' + currentHostIdx + ': ' + EMBED_HOSTS[currentHostIdx]);
+        playerWrap.innerHTML = '';
+        playerWrap.appendChild(createIframe(currentHostIdx));
+      }
+    }
 
     function createIframe(hostIdx) {
+      clearTimeout(embedTimer);
+
       var iframe = document.createElement('iframe');
       iframe.src = toEmbedUrl(selectedItem.videoId, hostIdx);
       iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
       iframe.setAttribute('frameborder', '0');
+      iframe.setAttribute('allowfullscreen', '');
       iframe.style.cssText = 'width:100%;height:100%;display:block;border:0;';
       iframe.title = selectedItem.title || 'Трейлер';
 
-      // If embed fails to load (DNS blocked), try the next host
-      iframe.addEventListener('error', function () {
-        if (currentHostIdx < EMBED_HOSTS.length - 1) {
-          currentHostIdx++;
-          playerWrap.innerHTML = '';
-          playerWrap.appendChild(createIframe(currentHostIdx));
+      // Network-level failure → try next host immediately
+      iframe.addEventListener('error', function () { tryNextHost(); });
+
+      // Timeout fallback: if embed seems broken after N seconds, try next host.
+      // We listen for a postMessage from YouTube's player to confirm it loaded.
+      var loaded = false;
+
+      function onPlayerMessage(e) {
+        try {
+          // YouTube sends JSON messages when player is ready
+          if (typeof e.data === 'string' && e.data.indexOf('"event":"onReady"') !== -1) {
+            loaded = true;
+            clearTimeout(embedTimer);
+          }
+          // Invidious sends different messages
+          if (e.source === iframe.contentWindow) {
+            loaded = true;
+            clearTimeout(embedTimer);
+          }
+        } catch (ex) { /* cross-origin, ignore */ }
+      }
+      window.addEventListener('message', onPlayerMessage);
+
+      // Set a timeout — if no player-ready signal, assume broken
+      embedTimer = setTimeout(function () {
+        window.removeEventListener('message', onPlayerMessage);
+        if (!loaded && currentHostIdx < EMBED_HOSTS.length - 1) {
+          console.log('[TrailerPlugin] Embed timeout on host #' + hostIdx + ', switching');
+          tryNextHost();
         }
-      });
+      }, EMBED_TIMEOUT_SEC * 1000);
 
       return iframe;
     }
@@ -516,6 +555,6 @@
 
   onMaybeNavigated();
 
-  console.log('[TrailerPlugin] Loaded v2.2 — piped.video primary embed (bypass Error 153)');
+  console.log('[TrailerPlugin] Loaded v2.3 — youtube-nocookie + invidious fallback, timeout auto-switch');
 
 })();
