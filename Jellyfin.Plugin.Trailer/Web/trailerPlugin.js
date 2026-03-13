@@ -145,7 +145,7 @@
       closeModal();
     });
 
-    // ── Media element: YouTube iframe OR HTML5 video
+    // ── Media element: YouTube iframe OR HTML5 video (proxied through server)
     var media;
     if (youtube) {
       media = document.createElement('iframe');
@@ -156,13 +156,34 @@
       media.style.cssText = 'width:100%;height:100%;display:block;border:0;';
       media.title = 'Трейлер';
     } else {
-      // Direct video URL (MP4, WebM, etc.)
+      // Direct video URL — proxy through Jellyfin server to avoid browser CORS/access issues
+      var proxyUrl = '/Trailer/proxy?url=' + encodeURIComponent(trailerUrl);
+      var auth = getAuthHeader();
+
       media = document.createElement('video');
-      media.src = trailerUrl;
       media.controls = true;
       media.autoplay = true;
       media.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain;';
       media.title = 'Трейлер';
+
+      // Fetch via proxy with auth, create blob URL for <video>
+      fetch(proxyUrl, { headers: auth ? { 'Authorization': auth } : {} })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Proxy HTTP ' + r.status);
+          return r.blob();
+        })
+        .then(function (blob) {
+          media.src = URL.createObjectURL(blob);
+        })
+        .catch(function (err) {
+          console.error('[TrailerPlugin] Proxy fetch error:', err);
+          // Show error message in modal
+          media.style.display = 'none';
+          var errMsg = document.createElement('div');
+          errMsg.style.cssText = 'color:#fff;text-align:center;padding:40px;font-size:16px;';
+          errMsg.textContent = 'Не удалось загрузить трейлер';
+          wrap.appendChild(errMsg);
+        });
     }
 
     wrap.appendChild(closeBtn);
@@ -378,7 +399,7 @@
 
     onMaybeNavigated();
 
-    console.log('[TrailerPlugin] Loaded v1.2 — mode=' + playerMode);
+    console.log('[TrailerPlugin] Loaded v1.3 — mode=' + playerMode);
   });
 
 })();

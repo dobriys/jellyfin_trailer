@@ -1,4 +1,6 @@
+using System;
 using System.ComponentModel.DataAnnotations;
+using System.Net.Http;
 using System.Net.Mime;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,12 +22,17 @@ namespace Jellyfin.Plugin.Trailer.Controllers;
 public class TrailerController : ControllerBase
 {
     private readonly ITrailerService _trailerService;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TrailerController> _logger;
 
     /// <summary>Initializes a new instance of <see cref="TrailerController"/>.</summary>
-    public TrailerController(ITrailerService trailerService, ILogger<TrailerController> logger)
+    public TrailerController(
+        ITrailerService trailerService,
+        IHttpClientFactory httpClientFactory,
+        ILogger<TrailerController> logger)
     {
         _trailerService = trailerService;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -83,5 +90,63 @@ public class TrailerController : ControllerBase
         // Always return 200 so the JS can distinguish
         //   found=false (trailer unavailable)  vs  network/HTTP errors.
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Proxies a remote video URL through the Jellyfin server.
+    /// Used when direct browser access to the video host is blocked (e.g. Yandex S3).
+    /// The server fetches the video and streams it to the client.
+    /// </summary>
+    /// <param name="url">The remote video URL to proxy.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <response code="200">Video stream.</response>
+    /// <response code="400">Missing or invalid URL.</response>
+    /// <response code="502">Upstream server error.</response>
+    [HttpGet("proxy")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> ProxyVideo(
+        [FromQuery][Required] string url,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return BadRequest("Valid absolute URL is required");
+
+        // Only allow http/https schemes to prevent SSRF
+        if (uri.Scheme != "http" && uri.Scheme != "https")
+            return BadRequest("Only http/https URLs are supported");
+
+        _logger.LogInformation("Proxying video: {Url}", url);
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("TrailerProxy");
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Proxy upstream returned HTTP {Status} for {Url}", (int)response.StatusCode, url);
+                return StatusCode(502, "Upstream server returned " + (int)response.StatusCode);
+            }
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "video/mp4";
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+
+            // Stream the video directly to the client
+            return File(stream, contentType, enableRangeProcessing: true);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Proxy HTTP error for {Url}", url);
+            return StatusCode(502, "Failed to fetch upstream video");
+        }
+        catch (TaskCanceledException)
+        {
+            return StatusCode(504, "Upstream request timed out");
+        }
     }
 }
