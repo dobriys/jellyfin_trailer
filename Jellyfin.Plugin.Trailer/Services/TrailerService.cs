@@ -29,6 +29,7 @@ public class TrailerService : ITrailerService
     private readonly ILibraryManager _libraryManager;
     private readonly ITmdbTrailerProvider _tmdbProvider;
     private readonly IKinopoiskTrailerProvider _kinopoiskProvider;
+    private readonly IYouTubeTrailerProvider _youtubeProvider;
     private readonly ILogger<TrailerService> _logger;
 
     /// <summary>Initializes a new instance of <see cref="TrailerService"/>.</summary>
@@ -36,11 +37,13 @@ public class TrailerService : ITrailerService
         ILibraryManager libraryManager,
         ITmdbTrailerProvider tmdbProvider,
         IKinopoiskTrailerProvider kinopoiskProvider,
+        IYouTubeTrailerProvider youtubeProvider,
         ILogger<TrailerService> logger)
     {
         _libraryManager = libraryManager;
         _tmdbProvider = tmdbProvider;
         _kinopoiskProvider = kinopoiskProvider;
+        _youtubeProvider = youtubeProvider;
         _logger = logger;
     }
 
@@ -132,28 +135,24 @@ public class TrailerService : ITrailerService
                 _logger.LogInformation("Kinopoisk trailer found for '{Title}': {Url}", item.Name, result.TrailerUrl);
         }
 
-        // ---- YouTube search fallback -------------------------------------------
-        // When no direct trailer URL was found from any provider,
-        // generate a YouTube search URL so the user can find the trailer manually.
-        if (!result.Found && !string.IsNullOrEmpty(item.Name))
+        // ---- YouTube channel search --------------------------------------------
+        // Search for trailer on a specific YouTube channel (e.g. @KinomanTrailers)
+        if (!result.Found
+            && !string.IsNullOrEmpty(config.YouTubeApiKey)
+            && !string.IsNullOrEmpty(config.YouTubeChannelHandle))
         {
-            var searchQuery = item.Name + " трейлер";
-            if (item.ProductionYear.HasValue)
-                searchQuery += " " + item.ProductionYear.Value;
+            _logger.LogInformation("YouTube channel search for '{Title}' on {Channel}",
+                item.Name, config.YouTubeChannelHandle);
 
-            var ytSearchUrl = "https://www.youtube.com/results?search_query="
-                              + Uri.EscapeDataString(searchQuery);
+            result = await _youtubeProvider.GetTrailerAsync(
+                item.Name ?? string.Empty,
+                item.ProductionYear,
+                config.YouTubeApiKey,
+                config.YouTubeChannelHandle,
+                cancellationToken).ConfigureAwait(false);
 
-            result = new TrailerResult
-            {
-                TrailerUrl = ytSearchUrl,
-                Title = "Поиск трейлера на YouTube",
-                Source = TrailerSource.YouTubeSearch,
-                Language = "ru"
-            };
-
-            _logger.LogInformation("No direct trailer found for '{Title}', using YouTube search fallback: {Url}",
-                item.Name, ytSearchUrl);
+            if (result.Found)
+                _logger.LogInformation("YouTube trailer found for '{Title}': {Url}", item.Name, result.TrailerUrl);
         }
 
         if (!result.Found)

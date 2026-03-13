@@ -33,6 +33,18 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool EnableKinopoisk { get; set; } = true;
 
     /// <summary>
+    /// YouTube Data API v3 key for searching trailers on a specific YouTube channel.
+    /// Get one free at https://console.cloud.google.com → Enable "YouTube Data API v3" → Create API Key.
+    /// </summary>
+    public string YouTubeApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// YouTube channel handle to search for trailers (e.g. "@KinomanTrailers").
+    /// The plugin will search this channel for "{movie name} трейлер {year}".
+    /// </summary>
+    public string YouTubeChannelHandle { get; set; } = "@KinomanTrailers";
+
+    /// <summary>
     /// Duration in minutes to keep trailer results in the in-memory cache.
     /// Set to 0 to disable caching.
     /// </summary>

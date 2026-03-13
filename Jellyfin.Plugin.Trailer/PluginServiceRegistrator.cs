@@ -18,10 +18,13 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // Using named clients avoids socket exhaustion from ad-hoc HttpClient instantiation.
         serviceCollection.AddHttpClient("TMDb");
         serviceCollection.AddHttpClient("Kinopoisk");
+        serviceCollection.AddHttpClient("YouTube");
+        serviceCollection.AddHttpClient("TrailerProxy");
 
         // Trailer providers and service
         serviceCollection.AddSingleton<ITmdbTrailerProvider, TmdbTrailerProvider>();
         serviceCollection.AddSingleton<IKinopoiskTrailerProvider, KinopoiskTrailerProvider>();
+        serviceCollection.AddSingleton<IYouTubeTrailerProvider, YouTubeTrailerProvider>();
         serviceCollection.AddSingleton<ITrailerService, TrailerService>();
     }
 }

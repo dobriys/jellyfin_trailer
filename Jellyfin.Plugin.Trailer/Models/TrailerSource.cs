@@ -12,6 +12,6 @@ public enum TrailerSource
     /// <summary>Trailer was sourced from the Kinopoisk Unofficial API.</summary>
     Kinopoisk,
 
-    /// <summary>Fallback YouTube search URL (no direct trailer found).</summary>
-    YouTubeSearch
+    /// <summary>Trailer found on a YouTube channel via YouTube Data API v3.</summary>
+    YouTube
 }

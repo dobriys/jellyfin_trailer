@@ -69,7 +69,10 @@
       "Bash(/opt/homebrew/bin/gh --version)",
       "Bash(/opt/homebrew/bin/gh auth:*)",
       "Bash(curl -s http://192.168.0.100:8096/web/configurationpage?name=Trailer)",
-      "Bash(gh release:*)"
+      "Bash(gh release:*)",
+      "WebFetch(domain:www.youtube.com)",
+      "WebFetch(domain:www.tunepocket.com)",
+      "WebFetch(domain:yt.lemnoslife.com)"
     ]
   }
 }

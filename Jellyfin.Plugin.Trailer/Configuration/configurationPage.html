@@ -44,6 +44,41 @@
         </div>
       </div>
 
+      <!-- ── YouTube Channel ───────────────────────────────────────────────── -->
+      <div class="verticalSection">
+        <h3 class="sectionTitle">YouTube канал с трейлерами</h3>
+        <p class="fieldDescription">
+          Если Kinopoisk не нашёл YouTube-трейлер, плагин ищет на указанном YouTube-канале.
+          Требуется бесплатный YouTube Data API v3 ключ.
+        </p>
+
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="YouTubeApiKey">
+            YouTube Data API v3 Key
+          </label>
+          <input id="YouTubeApiKey" type="text" class="emby-input"
+                 autocomplete="off" spellcheck="false" />
+          <div class="fieldDescription">
+            Получить бесплатно:
+            <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">
+              Google Cloud Console</a> → Включить «YouTube Data API v3» → Credentials → Create API Key.
+          </div>
+        </div>
+
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="YouTubeChannelHandle">
+            YouTube канал (handle)
+          </label>
+          <input id="YouTubeChannelHandle" type="text" class="emby-input"
+                 autocomplete="off" spellcheck="false"
+                 placeholder="@KinomanTrailers" />
+          <div class="fieldDescription">
+            Handle канала, например <strong>@KinomanTrailers</strong>.
+            Плагин ищет «название фильма трейлер год» на этом канале.
+          </div>
+        </div>
+      </div>
+
       <!-- ── Режим плеера ──────────────────────────────────────────────────── -->
       <div class="verticalSection">
         <h3 class="sectionTitle">Режим воспроизведения</h3>
@@ -210,12 +245,14 @@
         console.log('[TrailerPlugin] config keys:', Object.keys(config).join(', '));
         console.log('[TrailerPlugin] config raw:', JSON.stringify(config));
 
-        document.getElementById('TmdbApiKey').value           = self.get(config, 'TmdbApiKey') || '';
-        document.getElementById('KinopoiskApiKey').value      = self.get(config, 'KinopoiskApiKey') || '';
-        document.getElementById('PreferredLanguage').value    = self.get(config, 'PreferredLanguage') || 'ru-RU';
-        document.getElementById('PlayerMode').value           = self.get(config, 'PlayerMode') || 'modal';
-        document.getElementById('FallbackToEnglish').checked  = self.get(config, 'FallbackToEnglish') !== false;
-        document.getElementById('EnableKinopoisk').checked    = self.get(config, 'EnableKinopoisk') !== false;
+        document.getElementById('TmdbApiKey').value              = self.get(config, 'TmdbApiKey') || '';
+        document.getElementById('KinopoiskApiKey').value         = self.get(config, 'KinopoiskApiKey') || '';
+        document.getElementById('YouTubeApiKey').value           = self.get(config, 'YouTubeApiKey') || '';
+        document.getElementById('YouTubeChannelHandle').value    = self.get(config, 'YouTubeChannelHandle') || '@KinomanTrailers';
+        document.getElementById('PreferredLanguage').value       = self.get(config, 'PreferredLanguage') || 'ru-RU';
+        document.getElementById('PlayerMode').value              = self.get(config, 'PlayerMode') || 'modal';
+        document.getElementById('FallbackToEnglish').checked     = self.get(config, 'FallbackToEnglish') !== false;
+        document.getElementById('EnableKinopoisk').checked       = self.get(config, 'EnableKinopoisk') !== false;
 
         var cache = self.get(config, 'CacheDurationMinutes');
         document.getElementById('CacheDurationMinutes').value = (cache !== undefined) ? cache : 60;
@@ -232,8 +269,10 @@
       btn.textContent = 'Сохранение...';
 
       ApiClient.getPluginConfiguration(self.pluginId).then(function (config) {
-        self.set(config, 'TmdbApiKey',           document.getElementById('TmdbApiKey').value.trim());
-        self.set(config, 'KinopoiskApiKey',      document.getElementById('KinopoiskApiKey').value.trim());
+        self.set(config, 'TmdbApiKey',            document.getElementById('TmdbApiKey').value.trim());
+        self.set(config, 'KinopoiskApiKey',       document.getElementById('KinopoiskApiKey').value.trim());
+        self.set(config, 'YouTubeApiKey',         document.getElementById('YouTubeApiKey').value.trim());
+        self.set(config, 'YouTubeChannelHandle',  document.getElementById('YouTubeChannelHandle').value.trim() || '@KinomanTrailers');
         self.set(config, 'PreferredLanguage',     document.getElementById('PreferredLanguage').value);
         self.set(config, 'PlayerMode',            document.getElementById('PlayerMode').value);
         self.set(config, 'FallbackToEnglish',     document.getElementById('FallbackToEnglish').checked);
