@@ -10,11 +10,11 @@
     "versions": [
       {
         "version": "1.0.18.0",
-        "checksum": "a2de9f7acfaf4c08ce43a08812eab188",
-        "changelog": "v1.0.18.0: piped.video primary embed — bypass YouTube Error 153",
+        "checksum": "bf64c04e90241b558c54c7fdfe8430de",
+        "changelog": "Initial release — встроенный YouTube плеер в Jellyfin",
         "targetAbi": "10.10.0.0",
         "sourceUrl": "https://github.com/dobriys/jellyfin_trailer/releases/download/v1.0.18.0/Jellyfin.Plugin.Trailer_1.0.18.0.zip",
-        "timestamp": "2026-03-13T18:48:07Z"
+        "timestamp": "2026-03-13T18:49:07Z"
       },
       {
         "version": "1.0.17.0",
