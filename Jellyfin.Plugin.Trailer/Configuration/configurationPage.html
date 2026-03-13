@@ -6,8 +6,7 @@
 <body>
 <div id="TrailerConfigPage"
      data-role="page"
-     class="page type-interior pluginConfigurationPage"
-     data-require="emby-input,emby-button,emby-select,emby-checkbox">
+     class="page type-interior pluginConfigurationPage">
   <div data-role="content">
     <div class="content-primary">
 
@@ -19,90 +18,91 @@
         </p>
       </div>
 
-      <!-- ── Режим плеера ─────────────────────────────────────────────────── -->
+      <!-- ── Kinopoisk ──────────────────────────────────────────────────────── -->
       <div class="verticalSection">
-        <h3 class="sectionTitle">Режим воспроизведения</h3>
-        <div class="selectContainer">
-          <label class="selectLabel" for="PlayerMode">Куда открывать трейлер</label>
-          <select id="PlayerMode" is="emby-select" class="emby-select">
-            <option value="modal">Внутри Jellyfin (встроенный плеер)</option>
-            <option value="tab">В новой вкладке (YouTube)</option>
-          </select>
-          <div class="fieldDescription">
-            <strong>Встроенный плеер</strong> — трейлер воспроизводится в наложении поверх интерфейса
-            без ухода с сайта. <strong>Новая вкладка</strong> — открывает YouTube в браузере.
-          </div>
-        </div>
-      </div>
+        <h3 class="sectionTitle">Kinopoisk</h3>
 
-      <!-- ── TMDb ─────────────────────────────────────────────────────────── -->
-      <div class="verticalSection">
-        <h3 class="sectionTitle">TMDb</h3>
-
-        <div class="inputContainer">
-          <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">TMDb API Key (v3)</label>
-          <input id="TmdbApiKey" type="text" is="emby-input" class="emby-input"
-                 autocomplete="off" spellcheck="false" />
-          <div class="fieldDescription">
-            Получить ключ:
-            <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">
-              themoviedb.org/settings/api</a>.
-            Используется для поиска трейлеров на YouTube.
-          </div>
-        </div>
-
-        <div class="selectContainer">
-          <label class="selectLabel" for="PreferredLanguage">Приоритетный язык трейлера</label>
-          <select id="PreferredLanguage" is="emby-select" class="emby-select">
-            <option value="ru-RU">Русский (ru-RU)</option>
-            <option value="en-US">English (en-US)</option>
-            <option value="uk-UA">Українська (uk-UA)</option>
-          </select>
-        </div>
-
-        <div class="checkboxContainer checkboxContainer-withDescription">
-          <label>
-            <input id="FallbackToEnglish" type="checkbox" is="emby-checkbox" class="emby-checkbox" />
-            <span>Если нет трейлера на выбранном языке — искать на английском</span>
+        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-bottom:12px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input id="EnableKinopoisk" type="checkbox" />
+            <span>Использовать Kinopoisk для поиска трейлеров</span>
           </label>
-        </div>
-      </div>
-
-      <!-- ── Kinopoisk ─────────────────────────────────────────────────────── -->
-      <div class="verticalSection">
-        <h3 class="sectionTitle">Kinopoisk (запасной источник)</h3>
-
-        <div class="checkboxContainer checkboxContainer-withDescription">
-          <label>
-            <input id="EnableKinopoisk" type="checkbox" is="emby-checkbox" class="emby-checkbox" />
-            <span>Включить Kinopoisk как запасной источник трейлеров</span>
-          </label>
-          <div class="fieldDescription">Используется только если TMDb не вернул результат.</div>
         </div>
 
         <div class="inputContainer">
           <label class="inputLabel inputLabelUnfocused" for="KinopoiskApiKey">
             Kinopoisk Unofficial API Key
           </label>
-          <input id="KinopoiskApiKey" type="text" is="emby-input" class="emby-input"
+          <input id="KinopoiskApiKey" type="text" class="emby-input"
                  autocomplete="off" spellcheck="false" />
           <div class="fieldDescription">
             Бесплатный токен:
             <a href="https://kinopoiskapiunofficial.tech" target="_blank" rel="noopener">
               kinopoiskapiunofficial.tech</a>.
-            <strong>Внимание:</strong> неофициальный API, работоспособность не гарантирована.
+            Регистрация → личный кабинет → скопировать API KEY.
           </div>
         </div>
       </div>
 
-      <!-- ── Cache ─────────────────────────────────────────────────────────── -->
+      <!-- ── Режим плеера ──────────────────────────────────────────────────── -->
+      <div class="verticalSection">
+        <h3 class="sectionTitle">Режим воспроизведения</h3>
+        <div class="selectContainer">
+          <label class="selectLabel" for="PlayerMode">Куда открывать трейлер</label>
+          <select id="PlayerMode" class="emby-select-withcolor emby-select">
+            <option value="modal">Внутри Jellyfin (встроенный плеер)</option>
+            <option value="tab">В новой вкладке (YouTube)</option>
+          </select>
+          <div class="fieldDescription">
+            <strong>Встроенный плеер</strong> — трейлер воспроизводится в наложении поверх
+            интерфейса без ухода с сайта. <strong>Новая вкладка</strong> — открывает YouTube.
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TMDb (необязательно) ──────────────────────────────────────────── -->
+      <div class="verticalSection">
+        <h3 class="sectionTitle">TMDb (необязательно)</h3>
+        <p class="fieldDescription">
+          Если TMDb API Key не заполнен — поиск идёт сразу через Kinopoisk.
+        </p>
+
+        <div class="inputContainer">
+          <label class="inputLabel inputLabelUnfocused" for="TmdbApiKey">TMDb API Key (v3)</label>
+          <input id="TmdbApiKey" type="text" class="emby-input"
+                 autocomplete="off" spellcheck="false" />
+          <div class="fieldDescription">
+            Получить:
+            <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener">
+              themoviedb.org/settings/api</a>.
+          </div>
+        </div>
+
+        <div class="selectContainer">
+          <label class="selectLabel" for="PreferredLanguage">Приоритетный язык трейлера</label>
+          <select id="PreferredLanguage" class="emby-select-withcolor emby-select">
+            <option value="ru-RU">Русский (ru-RU)</option>
+            <option value="en-US">English (en-US)</option>
+            <option value="uk-UA">Українська (uk-UA)</option>
+          </select>
+        </div>
+
+        <div class="checkboxContainer checkboxContainer-withDescription" style="margin-top:8px;">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input id="FallbackToEnglish" type="checkbox" />
+            <span>Если нет трейлера на выбранном языке — искать на английском</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- ── Кэширование ───────────────────────────────────────────────────── -->
       <div class="verticalSection">
         <h3 class="sectionTitle">Кэширование</h3>
         <div class="inputContainer">
           <label class="inputLabel inputLabelUnfocused" for="CacheDurationMinutes">
             Время кэширования (минуты)
           </label>
-          <input id="CacheDurationMinutes" type="number" is="emby-input" class="emby-input"
+          <input id="CacheDurationMinutes" type="number" class="emby-input"
                  min="0" max="1440" step="5" />
           <div class="fieldDescription">
             Результаты хранятся в памяти. 0 — отключить кэш.
@@ -111,14 +111,12 @@
         </div>
       </div>
 
-      <!-- ── Сохранить ──────────────────────────────────────────────────────── -->
+      <!-- ── Сохранить ─────────────────────────────────────────────────────── -->
       <div class="verticalSection">
-        <button type="button"
-                is="emby-button"
-                class="raised button-submit block"
-                onclick="TrailerPluginConfig.saveConfiguration()">
+        <button id="TrailerSaveBtn" type="button" class="raised emby-button">
           Сохранить
         </button>
+        <div id="TrailerSaveStatus" style="margin-top:8px;display:none;color:#4CAF50;"></div>
       </div>
 
       <!-- ── Подключение кнопки ─────────────────────────────────────────────── -->
@@ -129,25 +127,22 @@
           в папке веб-интерфейса Jellyfin или настройте Nginx.
         </p>
 
-        <!-- Способ 1 -->
         <h4 style="margin:16px 0 4px;">Способ 1 — файл custom.js (рекомендуется)</h4>
         <div class="fieldDescription" style="margin-bottom:8px;">
-          Создайте файл по одному из путей и вставьте в него содержимое ниже.
-          Jellyfin загружает его автоматически при старте.
+          Создайте файл по одному из путей:
           <ul style="margin:6px 0 0 16px;line-height:1.9;">
-            <li><strong>Docker:</strong> <code>/jellyfin/jellyfin-web/custom.js</code></li>
+            <li><strong>linuxserver/docker:</strong> <code>/usr/share/jellyfin/web/custom.js</code></li>
             <li><strong>Linux (apt/rpm):</strong> <code>/usr/share/jellyfin/web/custom.js</code></li>
             <li><strong>Windows:</strong> <code>C:\Program Files\Jellyfin\Server\jellyfin-web\custom.js</code></li>
           </ul>
-          После создания файла — перезапустите Jellyfin и обновите страницу (Ctrl+Shift+R).
         </div>
 
         <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:16px;">
           <div id="CustomJsContent"
                style="flex:1;padding:10px;background:#111;color:#ccc;
                       font-family:monospace;font-size:0.82em;border-radius:4px;
-                      white-space:pre;line-height:1.5;"></div>
-          <button type="button" is="emby-button" class="raised button-submit"
+                      white-space:pre;line-height:1.5;overflow-x:auto;"></div>
+          <button type="button" class="raised emby-button"
                   onclick="TrailerPluginConfig.copyById('CustomJsContent')">
             Копировать
           </button>
@@ -160,7 +155,6 @@
           }());
         </script>
 
-        <!-- Способ 2 -->
         <h4 style="margin:16px 0 4px;">Способ 2 — Nginx reverse proxy</h4>
         <div class="fieldDescription" style="margin-bottom:8px;">
           Добавьте в блок <code>location</code> вашего Nginx-конфига:
@@ -170,8 +164,8 @@
           <div id="NginxSnippet"
                style="flex:1;padding:10px;background:#111;color:#ccc;
                       font-family:monospace;font-size:0.82em;border-radius:4px;
-                      white-space:pre;line-height:1.5;"></div>
-          <button type="button" is="emby-button" class="raised button-submit"
+                      white-space:pre;line-height:1.5;overflow-x:auto;"></div>
+          <button type="button" class="raised emby-button"
                   onclick="TrailerPluginConfig.copyById('NginxSnippet')">
             Копировать
           </button>
@@ -196,24 +190,26 @@
     pluginId: '70788050-9f96-453d-a823-f41b7bd12712',
 
     loadConfiguration: function () {
-      Dashboard.showLoadingMsg();
       ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
-        document.getElementById('TmdbApiKey').value             = config.TmdbApiKey || '';
-        document.getElementById('KinopoiskApiKey').value        = config.KinopoiskApiKey || '';
-        document.getElementById('PreferredLanguage').value      = config.PreferredLanguage || 'ru-RU';
-        document.getElementById('PlayerMode').value             = config.PlayerMode || 'modal';
-        document.getElementById('FallbackToEnglish').checked    = config.FallbackToEnglish !== false;
-        document.getElementById('EnableKinopoisk').checked      = config.EnableKinopoisk !== false;
-        document.getElementById('CacheDurationMinutes').value   =
+        document.getElementById('TmdbApiKey').value           = config.TmdbApiKey || '';
+        document.getElementById('KinopoiskApiKey').value      = config.KinopoiskApiKey || '';
+        document.getElementById('PreferredLanguage').value    = config.PreferredLanguage || 'ru-RU';
+        document.getElementById('PlayerMode').value           = config.PlayerMode || 'modal';
+        document.getElementById('FallbackToEnglish').checked  = config.FallbackToEnglish !== false;
+        document.getElementById('EnableKinopoisk').checked    = config.EnableKinopoisk !== false;
+        document.getElementById('CacheDurationMinutes').value =
           (config.CacheDurationMinutes !== undefined) ? config.CacheDurationMinutes : 60;
-        Dashboard.hideLoadingMsg();
-      }).catch(function () {
-        Dashboard.hideLoadingMsg();
+      }).catch(function (e) {
+        console.error('[TrailerPlugin] load error', e);
       });
     },
 
     saveConfiguration: function () {
-      Dashboard.showLoadingMsg();
+      var btn = document.getElementById('TrailerSaveBtn');
+      var status = document.getElementById('TrailerSaveStatus');
+      btn.disabled = true;
+      btn.textContent = 'Сохранение...';
+
       ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
         config.TmdbApiKey           = document.getElementById('TmdbApiKey').value.trim();
         config.KinopoiskApiKey      = document.getElementById('KinopoiskApiKey').value.trim();
@@ -224,11 +220,18 @@
         config.CacheDurationMinutes = parseInt(document.getElementById('CacheDurationMinutes').value, 10) || 60;
         return ApiClient.updatePluginConfiguration(TrailerPluginConfig.pluginId, config);
       }).then(function () {
-        Dashboard.processPluginConfigurationUpdateResult();
+        btn.disabled = false;
+        btn.textContent = 'Сохранить';
+        status.textContent = '✓ Настройки сохранены';
+        status.style.display = 'block';
+        setTimeout(function () { status.style.display = 'none'; }, 3000);
       }).catch(function (err) {
         console.error('[TrailerPlugin] save error', err);
-        Dashboard.hideLoadingMsg();
-        Dashboard.alert('Ошибка сохранения. Проверьте консоль браузера.');
+        btn.disabled = false;
+        btn.textContent = 'Сохранить';
+        status.textContent = '✗ Ошибка сохранения — проверьте консоль';
+        status.style.color = '#f44336';
+        status.style.display = 'block';
       });
     },
 
@@ -236,7 +239,7 @@
       var text = document.getElementById(id).textContent;
       if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(function () {
-          Dashboard.alert('Скопировано в буфер обмена.');
+          alert('Скопировано в буфер обмена.');
         });
       } else {
         var tmp = document.createElement('textarea');
@@ -245,12 +248,15 @@
         tmp.select();
         document.execCommand('copy');
         document.body.removeChild(tmp);
-        Dashboard.alert('Скопировано в буфер обмена.');
+        alert('Скопировано в буфер обмена.');
       }
     }
   };
 
-  // Загружаем настройки — сразу и на каждый pageshow
+  document.getElementById('TrailerSaveBtn').addEventListener('click', function () {
+    TrailerPluginConfig.saveConfiguration();
+  });
+
   TrailerPluginConfig.loadConfiguration();
   document.querySelector('#TrailerConfigPage').addEventListener('pageshow', function () {
     TrailerPluginConfig.loadConfiguration();
