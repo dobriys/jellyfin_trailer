@@ -40,22 +40,20 @@
 
   /**
    * Build embed URL for a YouTube video.
-   * Tries multiple embed hosts in case some are blocked:
-   *   1. youtube-nocookie.com (default, privacy-friendly)
-   *   2. youtube.com (standard)
-   *   3. piped.video (open-source frontend, usually not blocked)
+   * Piped.video is primary — it's an open-source YouTube frontend
+   * that doesn't have embedding restrictions (no Error 153).
+   * YouTube embeds fail from non-HTTPS / local-IP origins.
    */
   var EMBED_HOSTS = [
+    'https://piped.video/embed/',
     'https://www.youtube-nocookie.com/embed/',
-    'https://www.youtube.com/embed/',
-    'https://piped.video/embed/'
+    'https://www.youtube.com/embed/'
   ];
 
   function toEmbedUrl(videoId, hostIndex) {
     var idx = hostIndex || 0;
     if (idx >= EMBED_HOSTS.length) idx = 0;
-    var origin = window.location.protocol + '//' + window.location.host;
-    return EMBED_HOSTS[idx] + videoId + '?autoplay=1&rel=0&origin=' + encodeURIComponent(origin);
+    return EMBED_HOSTS[idx] + videoId + '?autoplay=1&rel=0';
   }
 
   /** Format ISO date → "12 Декабря 2014" */
@@ -518,6 +516,6 @@
 
   onMaybeNavigated();
 
-  console.log('[TrailerPlugin] Loaded v2.1 — proxied thumbnails + multi-host embed');
+  console.log('[TrailerPlugin] Loaded v2.2 — piped.video primary embed (bypass Error 153)');
 
 })();

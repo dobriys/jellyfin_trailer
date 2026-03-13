@@ -72,7 +72,16 @@
       "Bash(gh release:*)",
       "WebFetch(domain:www.youtube.com)",
       "WebFetch(domain:www.tunepocket.com)",
-      "WebFetch(domain:yt.lemnoslife.com)"
+      "WebFetch(domain:yt.lemnoslife.com)",
+      "Bash(git status:*)",
+      "Read(//Users/stanislavbayata/.config/gh/**)",
+      "Read(//Users/stanislavbayata/.gh/**)",
+      "Bash(PLUGIN_DIR=\"/Volumes/Adata/guthub/jellyfin_trailer/dist/Trailer\")",
+      "Bash(mkdir -p \"$PLUGIN_DIR\")",
+      "Bash(cp Jellyfin.Plugin.Trailer/bin/Release/net8.0/Jellyfin.Plugin.Trailer.dll \"$PLUGIN_DIR/\")",
+      "Bash(cp meta.json \"$PLUGIN_DIR/\")",
+      "Bash(echo \"Deployed to $PLUGIN_DIR\")",
+      "Bash(python3 -c \":*)"
     ]
   }
 }
