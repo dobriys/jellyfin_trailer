@@ -136,12 +136,20 @@ public class KinopoiskTrailerProvider : IKinopoiskTrailerProvider
         CancellationToken cancellationToken)
     {
         var url = $"{KpBaseUrl}/api/v2.2/films/{kinopoiskId}/videos";
+        _logger.LogInformation("Kinopoisk fetching videos: {Url}", url);
 
         try
         {
             using var client = CreateClient(apiKey);
             using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                _logger.LogWarning("Kinopoisk videos HTTP {Status} for film {KpId}: {Body}",
+                    (int)response.StatusCode, kinopoiskId, body);
+                return new TrailerResult();
+            }
 
             using var stream = await response.Content
                 .ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -149,7 +157,12 @@ public class KinopoiskTrailerProvider : IKinopoiskTrailerProvider
                 .ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             if (!doc.RootElement.TryGetProperty("items", out var items))
+            {
+                _logger.LogWarning("Kinopoisk videos response has no 'items' for film {KpId}", kinopoiskId);
                 return new TrailerResult();
+            }
+
+            _logger.LogInformation("Kinopoisk returned {Count} videos for film {KpId}", items.GetArrayLength(), kinopoiskId);
 
             JsonElement? bestTrailer = null;
             JsonElement? bestTeaser = null;
@@ -159,6 +172,8 @@ public class KinopoiskTrailerProvider : IKinopoiskTrailerProvider
                 var site = GetString(video, "site");
                 var videoUrl = GetString(video, "url");
                 var videoType = GetString(video, "videoType");
+
+                _logger.LogInformation("  Video: site={Site}, type={Type}, url={Url}", site, videoType, videoUrl);
 
                 if (!string.Equals(site, "YOUTUBE", StringComparison.OrdinalIgnoreCase))
                     continue;
@@ -173,7 +188,11 @@ public class KinopoiskTrailerProvider : IKinopoiskTrailerProvider
 
             var chosen = bestTrailer ?? bestTeaser;
             if (chosen is null)
+            {
+                _logger.LogWarning("Kinopoisk: no YouTube TRAILER/TEASER found among {Count} videos for film {KpId}",
+                    items.GetArrayLength(), kinopoiskId);
                 return new TrailerResult();
+            }
 
             return new TrailerResult
             {

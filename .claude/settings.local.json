@@ -68,7 +68,8 @@
       "Bash(REPO_URL=https://github.com/dobriys/jellyfin_trailer ./package.sh --update-manifest)",
       "Bash(/opt/homebrew/bin/gh --version)",
       "Bash(/opt/homebrew/bin/gh auth:*)",
-      "Bash(curl -s http://192.168.0.100:8096/web/configurationpage?name=Trailer)"
+      "Bash(curl -s http://192.168.0.100:8096/web/configurationpage?name=Trailer)",
+      "Bash(gh release:*)"
     ]
   }
 }

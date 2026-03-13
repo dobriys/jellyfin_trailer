@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Trailer.Models;
@@ -75,7 +76,8 @@ public class TrailerService : ITrailerService
             return new TrailerResult();
         }
 
-        _logger.LogDebug("Resolving trailer for '{Title}' (id={ItemId})", item.Name, itemId);
+        _logger.LogInformation("Resolving trailer for '{Title}' (id={ItemId}), ProviderIds=[{Ids}]",
+            item.Name, itemId, string.Join(", ", item.ProviderIds.Select(kv => $"{kv.Key}={kv.Value}")));
 
         // ---- TMDb lookup -------------------------------------------------------
         var result = new TrailerResult();
@@ -96,17 +98,28 @@ public class TrailerService : ITrailerService
         }
         else if (string.IsNullOrEmpty(config.TmdbApiKey))
         {
-            _logger.LogDebug("TMDb API key not configured, skipping TMDb lookup");
+            _logger.LogInformation("TMDb API key not configured, skipping TMDb lookup");
         }
         else
         {
-            _logger.LogDebug("No TMDb ID for item '{Title}'", item.Name);
+            _logger.LogInformation("No TMDb ID for item '{Title}'", item.Name);
         }
 
         // ---- Kinopoisk fallback ------------------------------------------------
         if (!result.Found && config.EnableKinopoisk && !string.IsNullOrEmpty(config.KinopoiskApiKey))
         {
-            item.ProviderIds.TryGetValue("Kinopoisk", out var kpId);
+            // Case-insensitive lookup: the КиноПоиск plugin stores the key as lowercase "kinopoisk"
+            string? kpId = null;
+            foreach (var kv in item.ProviderIds)
+            {
+                if (string.Equals(kv.Key, "Kinopoisk", StringComparison.OrdinalIgnoreCase))
+                {
+                    kpId = kv.Value;
+                    break;
+                }
+            }
+
+            _logger.LogInformation("Kinopoisk lookup for '{Title}': kpId={KpId}", item.Name, kpId ?? "(null, will search by name)");
 
             result = await _kinopoiskProvider.GetTrailerAsync(
                 kpId,
@@ -120,7 +133,7 @@ public class TrailerService : ITrailerService
         }
 
         if (!result.Found)
-            _logger.LogDebug("No trailer found for '{Title}' (id={ItemId})", item.Name, itemId);
+            _logger.LogWarning("No trailer found for '{Title}' (id={ItemId})", item.Name, itemId);
 
         // ---- Store in cache ----------------------------------------------------
         if (config.CacheDurationMinutes > 0)
