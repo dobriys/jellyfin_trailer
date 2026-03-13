@@ -38,10 +38,24 @@
     } catch (e) { return null; }
   }
 
-  function toEmbedUrl(videoId) {
+  /**
+   * Build embed URL for a YouTube video.
+   * Tries multiple embed hosts in case some are blocked:
+   *   1. youtube-nocookie.com (default, privacy-friendly)
+   *   2. youtube.com (standard)
+   *   3. piped.video (open-source frontend, usually not blocked)
+   */
+  var EMBED_HOSTS = [
+    'https://www.youtube-nocookie.com/embed/',
+    'https://www.youtube.com/embed/',
+    'https://piped.video/embed/'
+  ];
+
+  function toEmbedUrl(videoId, hostIndex) {
+    var idx = hostIndex || 0;
+    if (idx >= EMBED_HOSTS.length) idx = 0;
     var origin = window.location.protocol + '//' + window.location.host;
-    return 'https://www.youtube-nocookie.com/embed/' + videoId
-      + '?autoplay=1&rel=0&origin=' + encodeURIComponent(origin);
+    return EMBED_HOSTS[idx] + videoId + '?autoplay=1&rel=0&origin=' + encodeURIComponent(origin);
   }
 
   /** Format ISO date → "12 Декабря 2014" */
@@ -231,10 +245,10 @@
       row.setAttribute('role', 'button');
       row.setAttribute('tabindex', '0');
 
-      // Thumbnail
+      // Thumbnail — use proxied URL (client may not reach i.ytimg.com directly)
       var thumb = document.createElement('img');
       thumb.className = 'trailer-result-thumb';
-      thumb.src = item.thumbnailUrl || '';
+      thumb.src = item.proxyThumbnailUrl || item.thumbnailUrl || '';
       thumb.alt = item.title || 'Трейлер';
       thumb.loading = idx < 3 ? 'eager' : 'lazy';
 
@@ -301,14 +315,29 @@
     var playerWrap = document.createElement('div');
     playerWrap.className = 'trailer-player-wrap';
 
-    var iframe = document.createElement('iframe');
-    iframe.src = toEmbedUrl(selectedItem.videoId);
-    iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
-    iframe.setAttribute('frameborder', '0');
-    iframe.style.cssText = 'width:100%;height:100%;display:block;border:0;';
-    iframe.title = selectedItem.title || 'Трейлер';
+    var currentHostIdx = 0;
 
-    playerWrap.appendChild(iframe);
+    function createIframe(hostIdx) {
+      var iframe = document.createElement('iframe');
+      iframe.src = toEmbedUrl(selectedItem.videoId, hostIdx);
+      iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+      iframe.setAttribute('frameborder', '0');
+      iframe.style.cssText = 'width:100%;height:100%;display:block;border:0;';
+      iframe.title = selectedItem.title || 'Трейлер';
+
+      // If embed fails to load (DNS blocked), try the next host
+      iframe.addEventListener('error', function () {
+        if (currentHostIdx < EMBED_HOSTS.length - 1) {
+          currentHostIdx++;
+          playerWrap.innerHTML = '';
+          playerWrap.appendChild(createIframe(currentHostIdx));
+        }
+      });
+
+      return iframe;
+    }
+
+    playerWrap.appendChild(createIframe(0));
 
     // Fallback link
     var fallback = document.createElement('div');
@@ -319,6 +348,15 @@
     link.rel = 'noopener noreferrer';
     link.textContent = 'Открыть на YouTube \u2197';
     fallback.appendChild(link);
+
+    // Also add a piped.video link as additional fallback
+    var pipedLink = document.createElement('a');
+    pipedLink.href = 'https://piped.video/watch?v=' + selectedItem.videoId;
+    pipedLink.target = '_blank';
+    pipedLink.rel = 'noopener noreferrer';
+    pipedLink.style.marginLeft = '16px';
+    pipedLink.textContent = 'Piped.video \u2197';
+    fallback.appendChild(pipedLink);
 
     // Now playing title
     var nowPlaying = document.createElement('div');
@@ -480,6 +518,6 @@
 
   onMaybeNavigated();
 
-  console.log('[TrailerPlugin] Loaded v2.0 — YouTube search modal');
+  console.log('[TrailerPlugin] Loaded v2.1 — proxied thumbnails + multi-host embed');
 
 })();

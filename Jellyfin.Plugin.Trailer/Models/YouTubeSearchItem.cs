@@ -1,3 +1,4 @@
+using System;
 using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.Trailer.Models;
@@ -19,9 +20,18 @@ public class YouTubeSearchItem
     [JsonPropertyName("channelTitle")]
     public string ChannelTitle { get; set; } = string.Empty;
 
-    /// <summary>Thumbnail URL (medium quality, 320×180).</summary>
+    /// <summary>Original YouTube thumbnail URL (medium quality, 320×180).</summary>
     [JsonPropertyName("thumbnailUrl")]
     public string ThumbnailUrl { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Proxied thumbnail URL through the Jellyfin server.
+    /// Used when the client cannot reach i.ytimg.com directly.
+    /// </summary>
+    [JsonPropertyName("proxyThumbnailUrl")]
+    public string ProxyThumbnailUrl => string.IsNullOrEmpty(ThumbnailUrl)
+        ? string.Empty
+        : "/Trailer/thumb?url=" + Uri.EscapeDataString(ThumbnailUrl);
 
     /// <summary>Publish date in ISO format.</summary>
     [JsonPropertyName("publishedAt")]

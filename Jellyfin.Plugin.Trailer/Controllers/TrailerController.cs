@@ -121,6 +121,56 @@ public class TrailerController : ControllerBase
     }
 
     /// <summary>
+    /// Proxies a YouTube thumbnail through the Jellyfin server.
+    /// Used when the client cannot reach i.ytimg.com (DNS blocked).
+    /// Only allows URLs from i.ytimg.com — no auth required (public thumbnails).
+    /// </summary>
+    /// <param name="url">YouTube thumbnail URL (must be from i.ytimg.com).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpGet("thumb")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> ProxyThumbnail(
+        [FromQuery][Required] string url,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return BadRequest("Valid absolute URL is required");
+
+        // Only allow YouTube image CDN to prevent abuse
+        if (!uri.Host.EndsWith("ytimg.com", StringComparison.OrdinalIgnoreCase))
+            return BadRequest("Only ytimg.com URLs are allowed");
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient("TrailerProxy");
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+                return StatusCode(502, "Upstream returned " + (int)response.StatusCode);
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+
+            // Cache thumbnails for 24 hours
+            Response.Headers["Cache-Control"] = "public, max-age=86400";
+            return File(stream, contentType);
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(502, "Failed to fetch thumbnail");
+        }
+        catch (TaskCanceledException)
+        {
+            return StatusCode(504, "Thumbnail request timed out");
+        }
+    }
+
+    /// <summary>
     /// Proxies a remote video URL through the Jellyfin server.
     /// Used when direct browser access to the video host is blocked (e.g. Yandex S3).
     /// The server fetches the video and streams it to the client.
