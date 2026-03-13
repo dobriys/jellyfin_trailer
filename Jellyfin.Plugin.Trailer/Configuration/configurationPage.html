@@ -191,14 +191,15 @@
 
     loadConfiguration: function () {
       ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
-        document.getElementById('TmdbApiKey').value           = config.TmdbApiKey || '';
-        document.getElementById('KinopoiskApiKey').value      = config.KinopoiskApiKey || '';
-        document.getElementById('PreferredLanguage').value    = config.PreferredLanguage || 'ru-RU';
-        document.getElementById('PlayerMode').value           = config.PlayerMode || 'modal';
-        document.getElementById('FallbackToEnglish').checked  = config.FallbackToEnglish !== false;
-        document.getElementById('EnableKinopoisk').checked    = config.EnableKinopoisk !== false;
+        console.log('[TrailerPlugin] config loaded:', JSON.stringify(config));
+        document.getElementById('TmdbApiKey').value           = config.tmdbApiKey || '';
+        document.getElementById('KinopoiskApiKey').value      = config.kinopoiskApiKey || '';
+        document.getElementById('PreferredLanguage').value    = config.preferredLanguage || 'ru-RU';
+        document.getElementById('PlayerMode').value           = config.playerMode || 'modal';
+        document.getElementById('FallbackToEnglish').checked  = config.fallbackToEnglish !== false;
+        document.getElementById('EnableKinopoisk').checked    = config.enableKinopoisk !== false;
         document.getElementById('CacheDurationMinutes').value =
-          (config.CacheDurationMinutes !== undefined) ? config.CacheDurationMinutes : 60;
+          (config.cacheDurationMinutes !== undefined) ? config.cacheDurationMinutes : 60;
       }).catch(function (e) {
         console.error('[TrailerPlugin] load error', e);
       });
@@ -211,13 +212,13 @@
       btn.textContent = 'Сохранение...';
 
       ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
-        config.TmdbApiKey           = document.getElementById('TmdbApiKey').value.trim();
-        config.KinopoiskApiKey      = document.getElementById('KinopoiskApiKey').value.trim();
-        config.PreferredLanguage    = document.getElementById('PreferredLanguage').value;
-        config.PlayerMode           = document.getElementById('PlayerMode').value;
-        config.FallbackToEnglish    = document.getElementById('FallbackToEnglish').checked;
-        config.EnableKinopoisk      = document.getElementById('EnableKinopoisk').checked;
-        config.CacheDurationMinutes = parseInt(document.getElementById('CacheDurationMinutes').value, 10) || 60;
+        config.tmdbApiKey           = document.getElementById('TmdbApiKey').value.trim();
+        config.kinopoiskApiKey      = document.getElementById('KinopoiskApiKey').value.trim();
+        config.preferredLanguage    = document.getElementById('PreferredLanguage').value;
+        config.playerMode           = document.getElementById('PlayerMode').value;
+        config.fallbackToEnglish    = document.getElementById('FallbackToEnglish').checked;
+        config.enableKinopoisk      = document.getElementById('EnableKinopoisk').checked;
+        config.cacheDurationMinutes = parseInt(document.getElementById('CacheDurationMinutes').value, 10) || 60;
         return ApiClient.updatePluginConfiguration(TrailerPluginConfig.pluginId, config);
       }).then(function () {
         btn.disabled = false;
