@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
 using System.Net.Mime;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Trailer.Models;
@@ -168,6 +169,100 @@ public class TrailerController : ControllerBase
         {
             return StatusCode(504, "Thumbnail request timed out");
         }
+    }
+
+    /// <summary>
+    /// Resolves a direct video stream URL for a YouTube video via Invidious API.
+    /// The server calls Invidious (server-to-server) to bypass browser restrictions.
+    /// Returns a proxied URL that the client can play via HTML5 &lt;video&gt;.
+    /// </summary>
+    /// <param name="videoId">YouTube video ID (11 chars).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    [HttpGet("stream/{videoId}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<IActionResult> ResolveStream(
+        [FromRoute][Required] string videoId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(videoId) || videoId.Length != 11)
+            return BadRequest("Valid 11-character YouTube video ID is required");
+
+        // Try multiple Invidious instances (server-side, no anti-bot issues)
+        string[] invidiousHosts =
+        {
+            "https://inv.nadeko.net",
+            "https://invidious.nerdvpn.de",
+            "https://yewtu.be",
+            "https://invidious.privacyredirect.com"
+        };
+
+        var client = _httpClientFactory.CreateClient("TrailerProxy");
+
+        foreach (var host in invidiousHosts)
+        {
+            try
+            {
+                var apiUrl = $"{host}/api/v1/videos/{videoId}?fields=formatStreams,adaptiveFormats";
+                _logger.LogInformation("Resolving stream via {Host} for {VideoId}", host, videoId);
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
+                request.Headers.Add("Accept", "application/json");
+
+                var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Invidious {Host} returned {Status}", host, (int)response.StatusCode);
+                    continue;
+                }
+
+                var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(json);
+
+                // formatStreams has combined audio+video streams (ready to play)
+                if (doc.RootElement.TryGetProperty("formatStreams", out var streams))
+                {
+                    string? bestUrl = null;
+                    string? bestQuality = null;
+
+                    foreach (var stream in streams.EnumerateArray())
+                    {
+                        if (!stream.TryGetProperty("url", out var urlProp)) continue;
+                        var streamUrl = urlProp.GetString();
+                        if (string.IsNullOrEmpty(streamUrl)) continue;
+
+                        var quality = stream.TryGetProperty("qualityLabel", out var q) ? q.GetString() : "";
+
+                        // Prefer 720p, then any available
+                        if (bestUrl == null || (quality != null && quality.Contains("720")))
+                        {
+                            bestUrl = streamUrl;
+                            bestQuality = quality;
+                        }
+                    }
+
+                    if (!string.IsNullOrEmpty(bestUrl))
+                    {
+                        _logger.LogInformation("Resolved stream {Quality} for {VideoId} via {Host}",
+                            bestQuality, videoId, host);
+
+                        // Return a proxy URL so the client doesn't need direct access to Google servers
+                        var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(bestUrl);
+                        return Ok(new { streamUrl = proxyUrl, quality = bestQuality, source = host });
+                    }
+                }
+
+                _logger.LogWarning("No formatStreams found in Invidious response from {Host}", host);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            {
+                _logger.LogWarning(ex, "Invidious {Host} failed for {VideoId}", host, videoId);
+            }
+        }
+
+        return StatusCode(502, "Could not resolve video stream from any Invidious instance");
     }
 
     /// <summary>

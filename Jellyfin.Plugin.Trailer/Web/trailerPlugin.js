@@ -28,36 +28,10 @@
   var lastItemId    = null;
   var debounceTimer = null;
 
-  // ── URL helpers ────────────────────────────────────────────────────────────
-
-  function getYouTubeVideoId(url) {
-    try {
-      var match = url.match(/[?&]v=([A-Za-z0-9_-]{11})/)
-              || url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-      return match ? match[1] : null;
-    } catch (e) { return null; }
-  }
-
-  /**
-   * Build embed URL for a YouTube video.
-   * youtube-nocookie.com is primary (origin param removed to fix Error 153).
-   * Invidious instances as fallback — no embed restrictions at all.
-   */
-  var EMBED_HOSTS = [
-    'https://www.youtube-nocookie.com/embed/',
-    'https://inv.nadeko.net/embed/',
-    'https://invidious.nerdvpn.de/embed/',
-    'https://yewtu.be/embed/'
-  ];
-
-  /** Seconds to wait before assuming embed failed and trying next host */
-  var EMBED_TIMEOUT_SEC = 6;
-
-  function toEmbedUrl(videoId, hostIndex) {
-    var idx = hostIndex || 0;
-    if (idx >= EMBED_HOSTS.length) idx = 0;
-    return EMBED_HOSTS[idx] + videoId + '?autoplay=1&rel=0';
-  }
+  // ── Playback ──────────────────────────────────────────────────────────────
+  // Video playback uses server-side stream resolution via Invidious API.
+  // The server resolves direct video URLs and proxies them through /Trailer/proxy.
+  // No iframes or embed hosts needed — plays via HTML5 <video>.
 
   /** Format ISO date → "12 Декабря 2014" */
   function formatDate(isoStr) {
@@ -287,7 +261,12 @@
     });
   }
 
-  /** Switch the modal content to the YouTube player for the selected video */
+  /**
+   * Switch the modal to the video player.
+   * Uses server-side stream resolution via Invidious API → HTML5 <video>.
+   * The server fetches the direct stream URL and proxies it to the client.
+   * No iframes, no YouTube embed restrictions.
+   */
   function showPlayer(contentArea, panel, header, allItems, selectedItem) {
     // Widen the panel for the player
     panel.style.width = 'min(94vw,960px)';
@@ -303,7 +282,6 @@
     backBtn.type = 'button';
     backBtn.innerHTML = '&#8592; Назад к списку';
     backBtn.addEventListener('click', function () {
-      // Reset panel width
       panel.style.width = 'min(94vw,540px)';
       panel.style.maxHeight = '85vh';
       contentArea.innerHTML = '';
@@ -316,84 +294,11 @@
     var playerWrap = document.createElement('div');
     playerWrap.className = 'trailer-player-wrap';
 
-    var currentHostIdx = 0;
-    var embedTimer = null;
-
-    function tryNextHost() {
-      if (currentHostIdx < EMBED_HOSTS.length - 1) {
-        currentHostIdx++;
-        console.log('[TrailerPlugin] Trying embed host #' + currentHostIdx + ': ' + EMBED_HOSTS[currentHostIdx]);
-        playerWrap.innerHTML = '';
-        playerWrap.appendChild(createIframe(currentHostIdx));
-      }
-    }
-
-    function createIframe(hostIdx) {
-      clearTimeout(embedTimer);
-
-      var iframe = document.createElement('iframe');
-      iframe.src = toEmbedUrl(selectedItem.videoId, hostIdx);
-      iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
-      iframe.setAttribute('frameborder', '0');
-      iframe.setAttribute('allowfullscreen', '');
-      iframe.style.cssText = 'width:100%;height:100%;display:block;border:0;';
-      iframe.title = selectedItem.title || 'Трейлер';
-
-      // Network-level failure → try next host immediately
-      iframe.addEventListener('error', function () { tryNextHost(); });
-
-      // Timeout fallback: if embed seems broken after N seconds, try next host.
-      // We listen for a postMessage from YouTube's player to confirm it loaded.
-      var loaded = false;
-
-      function onPlayerMessage(e) {
-        try {
-          // YouTube sends JSON messages when player is ready
-          if (typeof e.data === 'string' && e.data.indexOf('"event":"onReady"') !== -1) {
-            loaded = true;
-            clearTimeout(embedTimer);
-          }
-          // Invidious sends different messages
-          if (e.source === iframe.contentWindow) {
-            loaded = true;
-            clearTimeout(embedTimer);
-          }
-        } catch (ex) { /* cross-origin, ignore */ }
-      }
-      window.addEventListener('message', onPlayerMessage);
-
-      // Set a timeout — if no player-ready signal, assume broken
-      embedTimer = setTimeout(function () {
-        window.removeEventListener('message', onPlayerMessage);
-        if (!loaded && currentHostIdx < EMBED_HOSTS.length - 1) {
-          console.log('[TrailerPlugin] Embed timeout on host #' + hostIdx + ', switching');
-          tryNextHost();
-        }
-      }, EMBED_TIMEOUT_SEC * 1000);
-
-      return iframe;
-    }
-
-    playerWrap.appendChild(createIframe(0));
-
-    // Fallback link
-    var fallback = document.createElement('div');
-    fallback.className = 'trailer-player-fallback';
-    var link = document.createElement('a');
-    link.href = selectedItem.videoUrl || ('https://www.youtube.com/watch?v=' + selectedItem.videoId);
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = 'Открыть на YouTube \u2197';
-    fallback.appendChild(link);
-
-    // Also add a piped.video link as additional fallback
-    var pipedLink = document.createElement('a');
-    pipedLink.href = 'https://piped.video/watch?v=' + selectedItem.videoId;
-    pipedLink.target = '_blank';
-    pipedLink.rel = 'noopener noreferrer';
-    pipedLink.style.marginLeft = '16px';
-    pipedLink.textContent = 'Piped.video \u2197';
-    fallback.appendChild(pipedLink);
+    // Loading indicator
+    var loadingEl = document.createElement('div');
+    loadingEl.className = 'trailer-modal-loading';
+    loadingEl.textContent = 'Загрузка видео...';
+    playerWrap.appendChild(loadingEl);
 
     // Now playing title
     var nowPlaying = document.createElement('div');
@@ -404,11 +309,72 @@
     channelInfo.style.cssText = 'padding:0 16px 10px;color:#888;font-size:12px;';
     channelInfo.textContent = [selectedItem.channelTitle, formatDate(selectedItem.publishedAt)].filter(Boolean).join(' \u2022 ');
 
+    // Fallback link (always visible)
+    var fallback = document.createElement('div');
+    fallback.className = 'trailer-player-fallback';
+    var link = document.createElement('a');
+    link.href = selectedItem.videoUrl || ('https://www.youtube.com/watch?v=' + selectedItem.videoId);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Открыть на YouTube \u2197';
+    fallback.appendChild(link);
+
     contentArea.appendChild(backBtn);
     contentArea.appendChild(playerWrap);
     contentArea.appendChild(nowPlaying);
     contentArea.appendChild(channelInfo);
     contentArea.appendChild(fallback);
+
+    // ── Resolve stream via server-side Invidious API ──
+    var auth = getAuthHeader();
+    if (!auth) {
+      loadingEl.textContent = 'Нет токена авторизации';
+      return;
+    }
+
+    fetch(API_PATH + 'stream/' + selectedItem.videoId, { headers: { 'Authorization': auth } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.streamUrl) throw new Error('No stream URL');
+        console.log('[TrailerPlugin] Stream resolved: ' + data.quality + ' via ' + data.source);
+
+        playerWrap.innerHTML = '';
+
+        var video = document.createElement('video');
+        video.controls = true;
+        video.autoplay = true;
+        video.style.cssText = 'width:100%;height:100%;display:block;background:#000;';
+        video.title = selectedItem.title || 'Трейлер';
+
+        // Use the proxied stream URL from Jellyfin server
+        video.src = data.streamUrl;
+
+        video.addEventListener('error', function () {
+          console.warn('[TrailerPlugin] HTML5 video error, showing fallback');
+          playerWrap.innerHTML = '';
+          var errMsg = document.createElement('div');
+          errMsg.className = 'trailer-modal-empty';
+          errMsg.innerHTML = 'Не удалось воспроизвести видео.<br><a href="' +
+            (selectedItem.videoUrl || 'https://www.youtube.com/watch?v=' + selectedItem.videoId) +
+            '" target="_blank" rel="noopener" style="color:#6cf">Открыть на YouTube \u2197</a>';
+          playerWrap.appendChild(errMsg);
+        });
+
+        playerWrap.appendChild(video);
+      })
+      .catch(function (err) {
+        console.error('[TrailerPlugin] Stream resolve error:', err);
+        playerWrap.innerHTML = '';
+        var errMsg = document.createElement('div');
+        errMsg.className = 'trailer-modal-empty';
+        errMsg.innerHTML = 'Не удалось получить видео поток.<br><a href="' +
+          (selectedItem.videoUrl || 'https://www.youtube.com/watch?v=' + selectedItem.videoId) +
+          '" target="_blank" rel="noopener" style="color:#6cf">Открыть на YouTube \u2197</a>';
+        playerWrap.appendChild(errMsg);
+      });
   }
 
   // ── Button ─────────────────────────────────────────────────────────────────
@@ -555,6 +521,6 @@
 
   onMaybeNavigated();
 
-  console.log('[TrailerPlugin] Loaded v2.3 — youtube-nocookie + invidious fallback, timeout auto-switch');
+  console.log('[TrailerPlugin] Loaded v3.0 — server-side stream via Invidious API + HTML5 video');
 
 })();

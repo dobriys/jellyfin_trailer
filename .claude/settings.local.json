@@ -81,7 +81,8 @@
       "Bash(cp Jellyfin.Plugin.Trailer/bin/Release/net8.0/Jellyfin.Plugin.Trailer.dll \"$PLUGIN_DIR/\")",
       "Bash(cp meta.json \"$PLUGIN_DIR/\")",
       "Bash(echo \"Deployed to $PLUGIN_DIR\")",
-      "Bash(python3 -c \":*)"
+      "Bash(python3 -c \":*)",
+      "Bash(md5 -q Jellyfin.Plugin.Trailer_1.0.20.0.zip)"
     ]
   }
 }
