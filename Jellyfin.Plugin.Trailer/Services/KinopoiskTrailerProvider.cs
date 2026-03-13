@@ -164,8 +164,17 @@ public class KinopoiskTrailerProvider : IKinopoiskTrailerProvider
 
             _logger.LogInformation("Kinopoisk returned {Count} videos for film {KpId}", items.GetArrayLength(), kinopoiskId);
 
-            JsonElement? bestTrailer = null;
-            JsonElement? bestTeaser = null;
+            // Priority buckets (higher = better):
+            //   1. YouTube TRAILER
+            //   2. YouTube TEASER
+            //   3. Any site TRAILER (direct MP4, Kinopoisk widget, etc.)
+            //   4. Any site TEASER
+            //   5. Any video with a URL
+            JsonElement? ytTrailer = null;
+            JsonElement? ytTeaser = null;
+            JsonElement? anyTrailer = null;
+            JsonElement? anyTeaser = null;
+            JsonElement? anyVideo = null;
 
             foreach (var video in items.EnumerateArray())
             {
@@ -175,28 +184,34 @@ public class KinopoiskTrailerProvider : IKinopoiskTrailerProvider
 
                 _logger.LogInformation("  Video: site={Site}, type={Type}, url={Url}", site, videoType, videoUrl);
 
-                if (!string.Equals(site, "YOUTUBE", StringComparison.OrdinalIgnoreCase))
-                    continue;
                 if (string.IsNullOrEmpty(videoUrl))
                     continue;
 
-                if (string.Equals(videoType, "TRAILER", StringComparison.OrdinalIgnoreCase))
-                    bestTrailer ??= video;
-                else if (string.Equals(videoType, "TEASER", StringComparison.OrdinalIgnoreCase))
-                    bestTeaser ??= video;
+                var isYoutube = string.Equals(site, "YOUTUBE", StringComparison.OrdinalIgnoreCase);
+                var isTrailer = string.Equals(videoType, "TRAILER", StringComparison.OrdinalIgnoreCase);
+                var isTeaser = string.Equals(videoType, "TEASER", StringComparison.OrdinalIgnoreCase);
+
+                if (isYoutube && isTrailer) ytTrailer ??= video;
+                else if (isYoutube && isTeaser) ytTeaser ??= video;
+                else if (isTrailer) anyTrailer ??= video;
+                else if (isTeaser) anyTeaser ??= video;
+                else anyVideo ??= video;
             }
 
-            var chosen = bestTrailer ?? bestTeaser;
+            var chosen = ytTrailer ?? ytTeaser ?? anyTrailer ?? anyTeaser ?? anyVideo;
             if (chosen is null)
             {
-                _logger.LogWarning("Kinopoisk: no YouTube TRAILER/TEASER found among {Count} videos for film {KpId}",
+                _logger.LogWarning("Kinopoisk: no usable videos found among {Count} videos for film {KpId}",
                     items.GetArrayLength(), kinopoiskId);
                 return new TrailerResult();
             }
 
+            var chosenUrl = GetString(chosen.Value, "url")!;
+            _logger.LogInformation("Kinopoisk: chose video for film {KpId}: {Url}", kinopoiskId, chosenUrl);
+
             return new TrailerResult
             {
-                TrailerUrl = GetString(chosen.Value, "url"),
+                TrailerUrl = chosenUrl,
                 Title = GetString(chosen.Value, "name"),
                 Source = TrailerSource.Kinopoisk,
                 Language = "ru"

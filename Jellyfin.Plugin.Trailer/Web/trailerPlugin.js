@@ -35,7 +35,12 @@
   /** 'modal' | 'tab' — loaded from server config once */
   var playerMode    = 'modal';
 
-  // ── YouTube URL helpers ───────────────────────────────────────────────────
+  // ── URL helpers ──────────────────────────────────────────────────────────
+
+  /** Returns true if the URL points to YouTube. */
+  function isYouTubeUrl(url) {
+    return /youtube\.com|youtu\.be/i.test(url || '');
+  }
 
   /**
    * Converts any YouTube watch URL to an embed URL.
@@ -84,9 +89,11 @@
   function closeModal() {
     var m = document.getElementById(MODAL_ID);
     if (m) {
-      // Stop video playback by clearing the iframe src before removing
+      // Stop playback before removing
       var iframe = m.querySelector('iframe');
       if (iframe) iframe.src = '';
+      var video = m.querySelector('video');
+      if (video) { video.pause(); video.src = ''; }
       document.body.removeChild(m);
     }
   }
@@ -94,7 +101,7 @@
   function showModal(trailerUrl) {
     closeModal(); // ensure no duplicate
 
-    var embedUrl = toEmbedUrl(trailerUrl);
+    var youtube = isYouTubeUrl(trailerUrl);
 
     // ── Overlay backdrop
     var overlay = document.createElement('div');
@@ -138,17 +145,28 @@
       closeModal();
     });
 
-    // ── YouTube iframe
-    var iframe = document.createElement('iframe');
-    iframe.src = embedUrl;
-    iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
-    iframe.setAttribute('allowfullscreen', '');
-    iframe.setAttribute('frameborder', '0');
-    iframe.style.cssText = 'width:100%;height:100%;display:block;border:0;';
-    iframe.title = 'Трейлер';
+    // ── Media element: YouTube iframe OR HTML5 video
+    var media;
+    if (youtube) {
+      media = document.createElement('iframe');
+      media.src = toEmbedUrl(trailerUrl);
+      media.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+      media.setAttribute('allowfullscreen', '');
+      media.setAttribute('frameborder', '0');
+      media.style.cssText = 'width:100%;height:100%;display:block;border:0;';
+      media.title = 'Трейлер';
+    } else {
+      // Direct video URL (MP4, WebM, etc.)
+      media = document.createElement('video');
+      media.src = trailerUrl;
+      media.controls = true;
+      media.autoplay = true;
+      media.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain;';
+      media.title = 'Трейлер';
+    }
 
     wrap.appendChild(closeBtn);
-    wrap.appendChild(iframe);
+    wrap.appendChild(media);
     overlay.appendChild(wrap);
 
     // Close on backdrop click (outside the video box)
@@ -360,7 +378,7 @@
 
     onMaybeNavigated();
 
-    console.log('[TrailerPlugin] Loaded v1.1 — mode=' + playerMode);
+    console.log('[TrailerPlugin] Loaded v1.2 — mode=' + playerMode);
   });
 
 })();
