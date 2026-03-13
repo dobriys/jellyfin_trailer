@@ -82,7 +82,9 @@
       "Bash(cp meta.json \"$PLUGIN_DIR/\")",
       "Bash(echo \"Deployed to $PLUGIN_DIR\")",
       "Bash(python3 -c \":*)",
-      "Bash(md5 -q Jellyfin.Plugin.Trailer_1.0.20.0.zip)"
+      "Bash(md5 -q Jellyfin.Plugin.Trailer_1.0.20.0.zip)",
+      "WebFetch(domain:api.invidious.io)",
+      "WebFetch(domain:piped-instances.kavin.rocks)"
     ]
   }
 }

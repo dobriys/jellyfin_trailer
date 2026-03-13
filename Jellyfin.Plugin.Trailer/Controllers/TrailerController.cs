@@ -172,8 +172,8 @@ public class TrailerController : ControllerBase
     }
 
     /// <summary>
-    /// Resolves a direct video stream URL for a YouTube video via Invidious API.
-    /// The server calls Invidious (server-to-server) to bypass browser restrictions.
+    /// Resolves a direct video stream URL for a YouTube video.
+    /// Uses YouTube's internal player API directly (no third-party dependencies).
     /// Returns a proxied URL that the client can play via HTML5 &lt;video&gt;.
     /// </summary>
     /// <param name="videoId">YouTube video ID (11 chars).</param>
@@ -190,38 +190,151 @@ public class TrailerController : ControllerBase
         if (string.IsNullOrWhiteSpace(videoId) || videoId.Length != 11)
             return BadRequest("Valid 11-character YouTube video ID is required");
 
-        // Try multiple Invidious instances (server-side, no anti-bot issues)
-        string[] invidiousHosts =
+        // ── Strategy 1: YouTube's internal player API (most reliable) ──
+        var result = await TryYouTubePlayerApi(videoId, cancellationToken).ConfigureAwait(false);
+        if (result != null)
+            return Ok(result);
+
+        // ── Strategy 2: Invidious API fallback ──
+        result = await TryInvidiousApi(videoId, cancellationToken).ConfigureAwait(false);
+        if (result != null)
+            return Ok(result);
+
+        return StatusCode(502, "Could not resolve video stream");
+    }
+
+    private async Task<object?> TryYouTubePlayerApi(string videoId, CancellationToken ct)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient("TrailerProxy");
+
+            // YouTube's internal player API — works server-to-server without auth
+            var playerUrl = "https://www.youtube.com/youtubei/v1/player";
+
+            var payload = new
+            {
+                videoId,
+                context = new
+                {
+                    client = new
+                    {
+                        clientName = "ANDROID",
+                        clientVersion = "19.09.37",
+                        androidSdkVersion = 30,
+                        hl = "ru",
+                        gl = "RU"
+                    }
+                }
+            };
+
+            var jsonPayload = JsonSerializer.Serialize(payload);
+            using var request = new HttpRequestMessage(HttpMethod.Post, playerUrl)
+            {
+                Content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("User-Agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip");
+
+            _logger.LogInformation("Resolving stream via YouTube player API for {VideoId}", videoId);
+
+            var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("YouTube player API returned {Status}", (int)response.StatusCode);
+                return null;
+            }
+
+            var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+
+            // Check playability
+            if (doc.RootElement.TryGetProperty("playabilityStatus", out var status))
+            {
+                var statusStr = status.TryGetProperty("status", out var s) ? s.GetString() : "";
+                if (statusStr != "OK")
+                {
+                    _logger.LogWarning("YouTube player API: video {VideoId} status={Status}", videoId, statusStr);
+                    return null;
+                }
+            }
+
+            // Extract streaming data — look for combined (muxed) formats
+            if (!doc.RootElement.TryGetProperty("streamingData", out var streamingData))
+            {
+                _logger.LogWarning("YouTube player API: no streamingData for {VideoId}", videoId);
+                return null;
+            }
+
+            string? bestUrl = null;
+            string? bestQuality = null;
+
+            // formats = muxed audio+video (ready to play in <video>)
+            if (streamingData.TryGetProperty("formats", out var formats))
+            {
+                foreach (var fmt in formats.EnumerateArray())
+                {
+                    var url = fmt.TryGetProperty("url", out var u) ? u.GetString() : null;
+                    if (string.IsNullOrEmpty(url)) continue;
+
+                    var quality = fmt.TryGetProperty("qualityLabel", out var q) ? q.GetString() : "";
+
+                    if (bestUrl == null || (quality != null && quality.Contains("720")))
+                    {
+                        bestUrl = url;
+                        bestQuality = quality;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(bestUrl))
+            {
+                _logger.LogInformation("YouTube player API resolved {Quality} for {VideoId}", bestQuality, videoId);
+                var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(bestUrl);
+                return new { streamUrl = proxyUrl, quality = bestQuality, source = "youtube-api" };
+            }
+
+            _logger.LogWarning("YouTube player API: no muxed formats for {VideoId}", videoId);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "YouTube player API failed for {VideoId}", videoId);
+        }
+
+        return null;
+    }
+
+    private async Task<object?> TryInvidiousApi(string videoId, CancellationToken ct)
+    {
+        string[] hosts =
         {
             "https://inv.nadeko.net",
             "https://invidious.nerdvpn.de",
-            "https://yewtu.be",
-            "https://invidious.privacyredirect.com"
+            "https://yewtu.be"
         };
 
         var client = _httpClientFactory.CreateClient("TrailerProxy");
 
-        foreach (var host in invidiousHosts)
+        foreach (var host in hosts)
         {
             try
             {
-                var apiUrl = $"{host}/api/v1/videos/{videoId}?fields=formatStreams,adaptiveFormats";
-                _logger.LogInformation("Resolving stream via {Host} for {VideoId}", host, videoId);
+                var apiUrl = $"{host}/api/v1/videos/{videoId}?fields=formatStreams";
+                _logger.LogInformation("Trying Invidious {Host} for {VideoId}", host, videoId);
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
                 request.Headers.Add("Accept", "application/json");
+                request.Headers.Add("User-Agent", "Jellyfin-Trailer-Plugin/1.0");
 
-                var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                var response = await client.SendAsync(request, ct).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Invidious {Host} returned {Status}", host, (int)response.StatusCode);
                     continue;
                 }
 
-                var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
                 using var doc = JsonDocument.Parse(json);
 
-                // formatStreams has combined audio+video streams (ready to play)
                 if (doc.RootElement.TryGetProperty("formatStreams", out var streams))
                 {
                     string? bestUrl = null;
@@ -229,32 +342,26 @@ public class TrailerController : ControllerBase
 
                     foreach (var stream in streams.EnumerateArray())
                     {
-                        if (!stream.TryGetProperty("url", out var urlProp)) continue;
-                        var streamUrl = urlProp.GetString();
-                        if (string.IsNullOrEmpty(streamUrl)) continue;
+                        var url = stream.TryGetProperty("url", out var u) ? u.GetString() : null;
+                        if (string.IsNullOrEmpty(url)) continue;
 
                         var quality = stream.TryGetProperty("qualityLabel", out var q) ? q.GetString() : "";
 
-                        // Prefer 720p, then any available
                         if (bestUrl == null || (quality != null && quality.Contains("720")))
                         {
-                            bestUrl = streamUrl;
+                            bestUrl = url;
                             bestQuality = quality;
                         }
                     }
 
                     if (!string.IsNullOrEmpty(bestUrl))
                     {
-                        _logger.LogInformation("Resolved stream {Quality} for {VideoId} via {Host}",
+                        _logger.LogInformation("Invidious resolved {Quality} for {VideoId} via {Host}",
                             bestQuality, videoId, host);
-
-                        // Return a proxy URL so the client doesn't need direct access to Google servers
                         var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(bestUrl);
-                        return Ok(new { streamUrl = proxyUrl, quality = bestQuality, source = host });
+                        return new { streamUrl = proxyUrl, quality = bestQuality, source = host };
                     }
                 }
-
-                _logger.LogWarning("No formatStreams found in Invidious response from {Host}", host);
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
             {
@@ -262,7 +369,7 @@ public class TrailerController : ControllerBase
             }
         }
 
-        return StatusCode(502, "Could not resolve video stream from any Invidious instance");
+        return null;
     }
 
     /// <summary>
