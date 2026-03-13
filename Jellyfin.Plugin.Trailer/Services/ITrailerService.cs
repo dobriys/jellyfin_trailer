@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Trailer.Models;
@@ -13,11 +14,11 @@ public interface ITrailerService
     /// <summary>
     /// Returns the best available trailer for the specified Jellyfin item.
     /// </summary>
-    /// <param name="itemId">Jellyfin item ID (GUID string).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>
-    /// A <see cref="TrailerResult"/> — <c>Found</c> is false when no trailer is available
-    /// or the item does not exist.
-    /// </returns>
     Task<TrailerResult> GetTrailerAsync(string itemId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Searches YouTube for trailers for the specified Jellyfin item.
+    /// Returns multiple results so the user can pick which one to watch.
+    /// </summary>
+    Task<List<YouTubeSearchItem>> SearchTrailersAsync(string itemId, CancellationToken cancellationToken);
 }

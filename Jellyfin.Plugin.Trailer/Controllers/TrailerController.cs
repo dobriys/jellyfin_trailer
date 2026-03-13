@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
 using System.Net.Mime;
@@ -90,6 +91,33 @@ public class TrailerController : ControllerBase
         // Always return 200 so the JS can distinguish
         //   found=false (trailer unavailable)  vs  network/HTTP errors.
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Searches YouTube for trailers and returns multiple results.
+    /// The client-side JS shows these in a modal list for user selection.
+    /// </summary>
+    /// <param name="itemId">Jellyfin item GUID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Array of YouTube search items.</returns>
+    [HttpGet("{itemId}/search")]
+    [Authorize]
+    [ProducesResponseType(typeof(List<YouTubeSearchItem>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<List<YouTubeSearchItem>>> SearchTrailersAsync(
+        [FromRoute][Required] string itemId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+            return BadRequest("itemId is required");
+
+        _logger.LogDebug("YouTube trailer search for item {ItemId}", itemId);
+
+        var results = await _trailerService.SearchTrailersAsync(itemId, cancellationToken)
+            .ConfigureAwait(false);
+
+        return Ok(results);
     }
 
     /// <summary>

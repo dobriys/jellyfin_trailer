@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -163,5 +164,41 @@ public class TrailerService : ITrailerService
             Cache[itemId] = (result, DateTime.UtcNow);
 
         return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<List<YouTubeSearchItem>> SearchTrailersAsync(
+        string itemId, CancellationToken cancellationToken)
+    {
+        var config = Plugin.Instance!.Configuration;
+
+        if (string.IsNullOrEmpty(config.YouTubeApiKey))
+        {
+            _logger.LogWarning("YouTube API key not configured — cannot search trailers");
+            return new List<YouTubeSearchItem>();
+        }
+
+        if (!Guid.TryParse(itemId, out var guid))
+        {
+            _logger.LogWarning("Invalid item ID format: '{ItemId}'", itemId);
+            return new List<YouTubeSearchItem>();
+        }
+
+        var item = _libraryManager.GetItemById(guid);
+        if (item is null)
+        {
+            _logger.LogWarning("Item {ItemId} not found in library", itemId);
+            return new List<YouTubeSearchItem>();
+        }
+
+        _logger.LogInformation("YouTube search for trailers: '{Title}' ({Year})",
+            item.Name, item.ProductionYear);
+
+        return await _youtubeProvider.SearchAsync(
+            item.Name ?? string.Empty,
+            item.ProductionYear,
+            config.YouTubeApiKey,
+            8,
+            cancellationToken).ConfigureAwait(false);
     }
 }

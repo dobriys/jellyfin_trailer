@@ -1,52 +1,35 @@
 /**
- * Jellyfin Trailer Plugin — Client Side  v1.1
+ * Jellyfin Trailer Plugin — Client Side  v2.0
  *
  * Injects a "Трейлер" button on movie detail pages.
+ * Clicking the button opens a modal with YouTube search results.
+ * User picks a trailer from the list → it plays inside the modal.
  *
- * Depending on the server-side PlayerMode setting the button either:
- *   modal  — shows a centered overlay with an embedded YouTube iframe (default)
- *   tab    — opens YouTube in a new browser tab (legacy behaviour)
- *
- * Deployment:
- *   1. This file is served by the C# plugin at:
- *      /web/configurationpage?name=trailerPlugin_js
- *   2. Add the loader snippet via the jellyfin-plugin-custom-javascript plugin:
- *      (function(){var s=document.createElement('script');
- *       s.src='/web/configurationpage?name=trailerPlugin_js';
- *       document.head.appendChild(s);})();
+ * Flow:
+ *   1. Button click → GET /Trailer/{itemId}/search → list of YouTube results
+ *   2. Modal shows scrollable list with thumbnails, titles, channel names
+ *   3. User clicks a result → try YouTube embed in same modal
+ *   4. If embed fails → "Открыть на YouTube" fallback link
  */
 (function () {
   'use strict';
 
   // ── Constants ──────────────────────────────────────────────────────────────
 
-  var BUTTON_ID      = 'trailer-plugin-btn';
-  var MODAL_ID       = 'trailer-plugin-modal';
-  var API_PATH       = '/Trailer/';
-  var CONFIG_PATH    = '/Trailer/config';
-  var DEBOUNCE_MS    = 400;
+  var BUTTON_ID       = 'trailer-plugin-btn';
+  var MODAL_ID        = 'trailer-plugin-modal';
+  var API_PATH        = '/Trailer/';
+  var DEBOUNCE_MS     = 400;
   var WAIT_TIMEOUT_MS = 5000;
-  var WAIT_POLL_MS   = 150;
+  var WAIT_POLL_MS    = 150;
 
   // ── State ──────────────────────────────────────────────────────────────────
 
   var lastItemId    = null;
   var debounceTimer = null;
-  /** 'modal' | 'tab' — loaded from server config once */
-  var playerMode    = 'modal';
 
-  // ── URL helpers ──────────────────────────────────────────────────────────
+  // ── URL helpers ────────────────────────────────────────────────────────────
 
-  /** Returns true if the URL points to YouTube. */
-  function isYouTubeUrl(url) {
-    return /youtube\.com|youtu\.be/i.test(url || '');
-  }
-
-  /**
-   * Extracts YouTube video ID from any YouTube URL format.
-   *   https://www.youtube.com/watch?v=XXXX  →  XXXX
-   *   https://youtu.be/XXXX                 →  XXXX
-   */
   function getYouTubeVideoId(url) {
     try {
       var match = url.match(/[?&]v=([A-Za-z0-9_-]{11})/)
@@ -55,226 +38,317 @@
     } catch (e) { return null; }
   }
 
-  /**
-   * Converts any YouTube watch URL to an embed URL.
-   * Includes origin parameter to prevent Error 153 (embedding restrictions).
-   */
-  function toEmbedUrl(url) {
-    var videoId = getYouTubeVideoId(url);
-    if (videoId) {
-      var origin = window.location.protocol + '//' + window.location.host;
-      return 'https://www.youtube-nocookie.com/embed/' + videoId
-        + '?autoplay=1&rel=0&origin=' + encodeURIComponent(origin);
-    }
-    return url;
+  function toEmbedUrl(videoId) {
+    var origin = window.location.protocol + '//' + window.location.host;
+    return 'https://www.youtube-nocookie.com/embed/' + videoId
+      + '?autoplay=1&rel=0&origin=' + encodeURIComponent(origin);
   }
 
-  // ── Auth helper ───────────────────────────────────────────────────────────
+  /** Format ISO date → "12 Декабря 2014" */
+  function formatDate(isoStr) {
+    if (!isoStr) return '';
+    try {
+      var d = new Date(isoStr);
+      var months = ['Января','Февраля','Марта','Апреля','Мая','Июня',
+                    'Июля','Августа','Сентября','Октября','Ноября','Декабря'];
+      return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+    } catch (e) { return ''; }
+  }
+
+  // ── Auth helper ────────────────────────────────────────────────────────────
 
   function getAuthHeader() {
     try {
       var token = window.ApiClient && window.ApiClient.accessToken();
       if (!token) return null;
       return 'MediaBrowser Client="Jellyfin Web", Token="' + token + '"';
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { return null; }
   }
 
-  // ── DOM poller ────────────────────────────────────────────────────────────
+  // ── DOM poller ─────────────────────────────────────────────────────────────
 
   function waitForElement(selector, timeoutMs, cb) {
     var el = document.querySelector(selector);
     if (el) { cb(el); return; }
-
     var started = Date.now();
     var timer = setInterval(function () {
       el = document.querySelector(selector);
-      if (el) {
-        clearInterval(timer);
-        cb(el);
-      } else if (Date.now() - started > timeoutMs) {
-        clearInterval(timer);
-      }
+      if (el) { clearInterval(timer); cb(el); }
+      else if (Date.now() - started > timeoutMs) { clearInterval(timer); }
     }, WAIT_POLL_MS);
   }
 
-  // ── Modal ─────────────────────────────────────────────────────────────────
-
-  function closeModal() {
-    var m = document.getElementById(MODAL_ID);
-    if (m) {
-      // Stop playback before removing
-      var iframe = m.querySelector('iframe');
-      if (iframe) iframe.src = '';
-      var video = m.querySelector('video');
-      if (video) { video.pause(); video.src = ''; }
-      document.body.removeChild(m);
-    }
-  }
-
-  function showModal(trailerUrl) {
-    closeModal(); // ensure no duplicate
-
-    var youtube = isYouTubeUrl(trailerUrl);
-
-    // ── Overlay backdrop
-    var overlay = document.createElement('div');
-    overlay.id = MODAL_ID;
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', 'Трейлер');
-    overlay.style.cssText = [
-      'position:fixed', 'inset:0', 'z-index:9999',
-      'display:flex', 'align-items:center', 'justify-content:center',
-      'background:rgba(0,0,0,0.85)',
-      'animation:trailerFadeIn 0.18s ease'
-    ].join(';');
-
-    // ── Inner container (responsive 16 : 9)
-    var wrap = document.createElement('div');
-    wrap.style.cssText = [
-      'position:relative',
-      'width:min(92vw,960px)',
-      'aspect-ratio:16/9',
-      'background:#000',
-      'border-radius:6px',
-      'overflow:hidden',
-      'box-shadow:0 8px 40px rgba(0,0,0,0.8)'
-    ].join(';');
-
-    // ── Close button
-    var closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.setAttribute('aria-label', 'Закрыть трейлер');
-    closeBtn.style.cssText = [
-      'position:absolute', 'top:8px', 'right:10px',
-      'z-index:10', 'background:rgba(0,0,0,0.6)', 'border:none',
-      'color:#fff', 'font-size:22px', 'line-height:1',
-      'width:36px', 'height:36px', 'border-radius:50%',
-      'cursor:pointer', 'display:flex', 'align-items:center', 'justify-content:center'
-    ].join(';');
-    closeBtn.textContent = '✕';
-    closeBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      closeModal();
-    });
-
-    // ── Media element: YouTube iframe OR HTML5 video
-    var media;
-    if (youtube) {
-      media = document.createElement('iframe');
-      media.src = toEmbedUrl(trailerUrl);
-      // Use 'allow' attribute only — do NOT add 'allowfullscreen' separately to avoid conflict
-      media.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
-      media.setAttribute('frameborder', '0');
-      media.style.cssText = 'width:100%;height:100%;display:block;border:0;';
-      media.title = 'Трейлер';
-
-      // If embed fails (Error 153 = embedding restricted by uploader),
-      // show a fallback link to open in a new tab
-      media.addEventListener('load', function () {
-        try {
-          // We can't read cross-origin iframe content, but we can detect
-          // if the iframe shows an error by checking its dimensions after load.
-          // As a simple fallback, add a "open in new tab" link below the iframe.
-        } catch (e) { /* ignore */ }
-      });
-    } else {
-      // Direct video URL — proxy through Jellyfin server to avoid browser CORS/access issues
-      var proxyUrl = '/Trailer/proxy?url=' + encodeURIComponent(trailerUrl);
-      var auth = getAuthHeader();
-
-      media = document.createElement('video');
-      media.controls = true;
-      media.autoplay = true;
-      media.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain;';
-      media.title = 'Трейлер';
-
-      // Fetch via proxy with auth, create blob URL for <video>
-      fetch(proxyUrl, { headers: auth ? { 'Authorization': auth } : {} })
-        .then(function (r) {
-          if (!r.ok) throw new Error('Proxy HTTP ' + r.status);
-          return r.blob();
-        })
-        .then(function (blob) {
-          media.src = URL.createObjectURL(blob);
-        })
-        .catch(function (err) {
-          console.error('[TrailerPlugin] Proxy fetch error:', err);
-          // Show error message in modal
-          media.style.display = 'none';
-          var errMsg = document.createElement('div');
-          errMsg.style.cssText = 'color:#fff;text-align:center;padding:40px;font-size:16px;';
-          errMsg.textContent = 'Не удалось загрузить трейлер';
-          wrap.appendChild(errMsg);
-        });
-    }
-
-    // ── "Open in new tab" fallback link (for YouTube embeds that may be restricted)
-    if (youtube) {
-      var fallbackLink = document.createElement('a');
-      fallbackLink.href = trailerUrl;
-      fallbackLink.target = '_blank';
-      fallbackLink.rel = 'noopener noreferrer';
-      fallbackLink.style.cssText = [
-        'position:absolute', 'bottom:-32px', 'left:0', 'right:0',
-        'text-align:center', 'color:#aaa', 'font-size:13px',
-        'text-decoration:underline', 'cursor:pointer'
-      ].join(';');
-      fallbackLink.textContent = 'Открыть на YouTube ↗';
-      wrap.style.marginBottom = '40px';
-    }
-
-    wrap.appendChild(closeBtn);
-    wrap.appendChild(media);
-    if (youtube && fallbackLink) wrap.appendChild(fallbackLink);
-    overlay.appendChild(wrap);
-
-    // Close on backdrop click (outside the video box)
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) closeModal();
-    });
-
-    // Close on Escape key
-    document.addEventListener('keydown', onEscKey);
-
-    document.body.appendChild(overlay);
-  }
-
-  function onEscKey(e) {
-    if (e.key === 'Escape' || e.keyCode === 27) {
-      document.removeEventListener('keydown', onEscKey);
-      closeModal();
-    }
-  }
-
-  // ── Inject fade-in keyframe once ──────────────────────────────────────────
+  // ── Inject styles once ─────────────────────────────────────────────────────
 
   (function injectStyles() {
     if (document.getElementById('trailer-plugin-styles')) return;
     var style = document.createElement('style');
     style.id = 'trailer-plugin-styles';
-    style.textContent =
-      '@keyframes trailerFadeIn{from{opacity:0}to{opacity:1}}';
+    style.textContent = [
+      '@keyframes trailerFadeIn{from{opacity:0}to{opacity:1}}',
+      '@keyframes trailerSlideIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}',
+      '.trailer-result-item{display:flex;gap:12px;padding:10px 14px;cursor:pointer;border-radius:6px;transition:background 0.15s;align-items:flex-start}',
+      '.trailer-result-item:hover{background:rgba(255,255,255,0.1)}',
+      '.trailer-result-item.active{background:rgba(255,255,255,0.15)}',
+      '.trailer-result-thumb{width:168px;min-width:168px;height:94px;border-radius:4px;object-fit:cover;background:#222}',
+      '.trailer-result-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}',
+      '.trailer-result-title{color:#fff;font-size:14px;font-weight:500;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+      '.trailer-result-channel{color:#aaa;font-size:12px}',
+      '.trailer-result-date{color:#888;font-size:11px}',
+      '.trailer-modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 12px;border-bottom:1px solid rgba(255,255,255,0.1)}',
+      '.trailer-modal-title{color:#fff;font-size:18px;font-weight:600;margin:0}',
+      '.trailer-modal-close{background:none;border:none;color:#aaa;font-size:24px;cursor:pointer;padding:4px 8px;border-radius:4px;line-height:1}',
+      '.trailer-modal-close:hover{color:#fff;background:rgba(255,255,255,0.1)}',
+      '.trailer-modal-list{overflow-y:auto;max-height:calc(80vh - 60px);padding:8px 6px}',
+      '.trailer-modal-loading{color:#aaa;text-align:center;padding:40px;font-size:15px}',
+      '.trailer-modal-empty{color:#888;text-align:center;padding:40px;font-size:15px}',
+      '.trailer-player-wrap{position:relative;width:100%;aspect-ratio:16/9;background:#000}',
+      '.trailer-player-back{display:flex;align-items:center;gap:6px;background:none;border:none;color:#aaa;font-size:13px;cursor:pointer;padding:10px 16px}',
+      '.trailer-player-back:hover{color:#fff}',
+      '.trailer-player-fallback{text-align:center;padding:8px;font-size:13px}',
+      '.trailer-player-fallback a{color:#aaa;text-decoration:underline}'
+    ].join('\n');
     document.head.appendChild(style);
   })();
 
-  // ── Button ────────────────────────────────────────────────────────────────
+  // ── Modal ──────────────────────────────────────────────────────────────────
+
+  function closeModal() {
+    var m = document.getElementById(MODAL_ID);
+    if (m) {
+      var iframe = m.querySelector('iframe');
+      if (iframe) iframe.src = '';
+      document.body.removeChild(m);
+    }
+    document.removeEventListener('keydown', onEscKey);
+  }
+
+  function onEscKey(e) {
+    if (e.key === 'Escape' || e.keyCode === 27) closeModal();
+  }
+
+  /** Show the modal with a loading spinner, then fetch results */
+  function showSearchModal(itemId) {
+    closeModal();
+
+    // ── Overlay
+    var overlay = document.createElement('div');
+    overlay.id = MODAL_ID;
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'YouTube — Трейлеры');
+    overlay.style.cssText = [
+      'position:fixed', 'inset:0', 'z-index:9999',
+      'display:flex', 'align-items:center', 'justify-content:center',
+      'background:rgba(0,0,0,0.88)',
+      'animation:trailerFadeIn 0.18s ease'
+    ].join(';');
+
+    // ── Panel
+    var panel = document.createElement('div');
+    panel.style.cssText = [
+      'width:min(94vw,540px)', 'max-height:85vh',
+      'background:#1a1a1a', 'border-radius:10px',
+      'display:flex', 'flex-direction:column',
+      'overflow:hidden',
+      'box-shadow:0 12px 50px rgba(0,0,0,0.8)',
+      'animation:trailerSlideIn 0.22s ease'
+    ].join(';');
+
+    // ── Header
+    var header = document.createElement('div');
+    header.className = 'trailer-modal-header';
+    var titleEl = document.createElement('h2');
+    titleEl.className = 'trailer-modal-title';
+    titleEl.textContent = 'YouTube — Трейлеры';
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'trailer-modal-close';
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Закрыть');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', function (e) { e.stopPropagation(); closeModal(); });
+    header.appendChild(titleEl);
+    header.appendChild(closeBtn);
+
+    // ── Content area (list or player)
+    var content = document.createElement('div');
+    content.className = 'trailer-modal-list';
+
+    // Loading state
+    var loading = document.createElement('div');
+    loading.className = 'trailer-modal-loading';
+    loading.textContent = 'Поиск трейлеров...';
+    content.appendChild(loading);
+
+    panel.appendChild(header);
+    panel.appendChild(content);
+    overlay.appendChild(panel);
+
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) closeModal();
+    });
+    document.addEventListener('keydown', onEscKey);
+    document.body.appendChild(overlay);
+
+    // ── Fetch search results
+    var auth = getAuthHeader();
+    if (!auth) {
+      loading.textContent = 'Нет токена авторизации';
+      return;
+    }
+
+    fetch(API_PATH + itemId + '/search', { headers: { 'Authorization': auth } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (items) {
+        content.innerHTML = '';
+        if (!items || items.length === 0) {
+          var empty = document.createElement('div');
+          empty.className = 'trailer-modal-empty';
+          empty.textContent = 'Трейлеры не найдены';
+          content.appendChild(empty);
+          return;
+        }
+        renderResultList(content, panel, header, items);
+      })
+      .catch(function (err) {
+        console.error('[TrailerPlugin] Search error:', err);
+        content.innerHTML = '';
+        var errEl = document.createElement('div');
+        errEl.className = 'trailer-modal-empty';
+        errEl.textContent = 'Ошибка поиска: ' + err.message;
+        content.appendChild(errEl);
+      });
+  }
+
+  /** Render list of YouTube search results in the content area */
+  function renderResultList(content, panel, header, items) {
+    items.forEach(function (item, idx) {
+      var row = document.createElement('div');
+      row.className = 'trailer-result-item';
+      row.setAttribute('role', 'button');
+      row.setAttribute('tabindex', '0');
+
+      // Thumbnail
+      var thumb = document.createElement('img');
+      thumb.className = 'trailer-result-thumb';
+      thumb.src = item.thumbnailUrl || '';
+      thumb.alt = item.title || 'Трейлер';
+      thumb.loading = idx < 3 ? 'eager' : 'lazy';
+
+      // Info block
+      var info = document.createElement('div');
+      info.className = 'trailer-result-info';
+
+      var title = document.createElement('div');
+      title.className = 'trailer-result-title';
+      title.textContent = item.title || 'Без названия';
+
+      var channel = document.createElement('div');
+      channel.className = 'trailer-result-channel';
+      channel.textContent = item.channelTitle || '';
+
+      var date = document.createElement('div');
+      date.className = 'trailer-result-date';
+      date.textContent = formatDate(item.publishedAt);
+
+      info.appendChild(title);
+      info.appendChild(channel);
+      info.appendChild(date);
+
+      row.appendChild(thumb);
+      row.appendChild(info);
+
+      row.addEventListener('click', function () {
+        showPlayer(content, panel, header, items, item);
+      });
+      row.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') showPlayer(content, panel, header, items, item);
+      });
+
+      content.appendChild(row);
+    });
+  }
+
+  /** Switch the modal content to the YouTube player for the selected video */
+  function showPlayer(contentArea, panel, header, allItems, selectedItem) {
+    // Widen the panel for the player
+    panel.style.width = 'min(94vw,960px)';
+    panel.style.maxHeight = '95vh';
+
+    contentArea.innerHTML = '';
+    contentArea.className = '';
+    contentArea.style.cssText = 'overflow-y:auto;';
+
+    // Back button
+    var backBtn = document.createElement('button');
+    backBtn.className = 'trailer-player-back';
+    backBtn.type = 'button';
+    backBtn.innerHTML = '&#8592; Назад к списку';
+    backBtn.addEventListener('click', function () {
+      // Reset panel width
+      panel.style.width = 'min(94vw,540px)';
+      panel.style.maxHeight = '85vh';
+      contentArea.innerHTML = '';
+      contentArea.className = 'trailer-modal-list';
+      contentArea.style.cssText = '';
+      renderResultList(contentArea, panel, header, allItems);
+    });
+
+    // Player container
+    var playerWrap = document.createElement('div');
+    playerWrap.className = 'trailer-player-wrap';
+
+    var iframe = document.createElement('iframe');
+    iframe.src = toEmbedUrl(selectedItem.videoId);
+    iframe.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+    iframe.setAttribute('frameborder', '0');
+    iframe.style.cssText = 'width:100%;height:100%;display:block;border:0;';
+    iframe.title = selectedItem.title || 'Трейлер';
+
+    playerWrap.appendChild(iframe);
+
+    // Fallback link
+    var fallback = document.createElement('div');
+    fallback.className = 'trailer-player-fallback';
+    var link = document.createElement('a');
+    link.href = selectedItem.videoUrl || ('https://www.youtube.com/watch?v=' + selectedItem.videoId);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Открыть на YouTube \u2197';
+    fallback.appendChild(link);
+
+    // Now playing title
+    var nowPlaying = document.createElement('div');
+    nowPlaying.style.cssText = 'padding:10px 16px 4px;color:#fff;font-size:14px;font-weight:500;';
+    nowPlaying.textContent = selectedItem.title || '';
+
+    var channelInfo = document.createElement('div');
+    channelInfo.style.cssText = 'padding:0 16px 10px;color:#888;font-size:12px;';
+    channelInfo.textContent = [selectedItem.channelTitle, formatDate(selectedItem.publishedAt)].filter(Boolean).join(' \u2022 ');
+
+    contentArea.appendChild(backBtn);
+    contentArea.appendChild(playerWrap);
+    contentArea.appendChild(nowPlaying);
+    contentArea.appendChild(channelInfo);
+    contentArea.appendChild(fallback);
+  }
+
+  // ── Button ─────────────────────────────────────────────────────────────────
 
   function removeExistingButton() {
     var old = document.getElementById(BUTTON_ID);
     if (old && old.parentNode) old.parentNode.removeChild(old);
   }
 
-  function createButton(trailerUrl, mode) {
+  function createButton(itemId) {
     var btn = document.createElement('button');
     btn.id = BUTTON_ID;
     btn.type = 'button';
     btn.className = 'emby-button raised';
-    btn.setAttribute('title', mode === 'tab'
-      ? 'Открыть трейлер на YouTube'
-      : 'Смотреть трейлер');
+    btn.setAttribute('title', 'Смотреть трейлер');
     btn.style.cssText = [
       'background-color:#c0392b', 'color:#fff',
       'margin:0 8px 0 0', 'padding:0 16px', 'height:36px',
@@ -288,22 +362,18 @@
       '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
         '<path d="M8 5v14l11-7z"/>' +
       '</svg>' +
-      '<span>Трейлер</span>';
+      '<span>\u0422\u0440\u0435\u0439\u043B\u0435\u0440</span>';
 
     btn.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
-      if (mode === 'tab') {
-        window.open(trailerUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        showModal(trailerUrl);
-      }
+      showSearchModal(itemId);
     });
 
     return btn;
   }
 
-  function injectButton(trailerUrl, mode) {
+  function injectButton(itemId) {
     removeExistingButton();
 
     var selectors = [
@@ -323,11 +393,11 @@
     }
 
     if (!container) {
-      console.warn('[TrailerPlugin] Could not find action button container. Selectors tried:', selectors);
+      console.warn('[TrailerPlugin] Could not find button container');
       return;
     }
 
-    var btn = createButton(trailerUrl, mode);
+    var btn = createButton(itemId);
     var firstBtn = container.querySelector('button, .emby-button');
     if (firstBtn) {
       container.insertBefore(btn, firstBtn);
@@ -336,49 +406,22 @@
     }
   }
 
-  // ── API calls ─────────────────────────────────────────────────────────────
+  // ── Check if YouTube API key configured (quick check via search endpoint) ──
 
-  /** Load player mode from server config (once per session). */
-  function loadConfig(cb) {
-    var auth = getAuthHeader();
-    if (!auth) { cb(); return; }
-
-    fetch(CONFIG_PATH, { headers: { 'Authorization': auth } })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (cfg) {
-        if (cfg && cfg.playerMode) playerMode = cfg.playerMode;
-        cb();
-      })
-      .catch(function () { cb(); });
-  }
-
-  /** Fetch trailer URL from backend then inject button. */
-  function fetchAndInject(itemId) {
+  /** Check if search returns results — if yes, show button */
+  function checkAndInject(itemId) {
     removeExistingButton();
 
     var auth = getAuthHeader();
-    if (!auth) {
-      console.warn('[TrailerPlugin] No Jellyfin auth token — cannot call API');
-      return;
-    }
+    if (!auth) return;
 
-    fetch(API_PATH + itemId, { headers: { 'Authorization': auth } })
-      .then(function (resp) {
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        return resp.json();
-      })
-      .then(function (data) {
-        if (data && data.found && data.trailerUrl) {
-          console.log('[TrailerPlugin] Trailer found:', data.source, playerMode, data.trailerUrl);
-          injectButton(data.trailerUrl, playerMode);
-        }
-      })
-      .catch(function (err) {
-        console.error('[TrailerPlugin] API error:', err);
-      });
+    // Always show the button — the search will be done when clicked
+    // We just need to verify the item exists and YouTube key is configured
+    // A lightweight check: just inject the button, search on click
+    injectButton(itemId);
   }
 
-  // ── Navigation detection ──────────────────────────────────────────────────
+  // ── Navigation detection ───────────────────────────────────────────────────
 
   function getItemIdFromHash() {
     var hash = window.location.hash;
@@ -391,7 +434,6 @@
   }
 
   function onMaybeNavigated() {
-    // Close any open trailer modal when leaving a detail page
     if (!isDetailPage()) {
       closeModal();
       removeExistingButton();
@@ -403,7 +445,6 @@
     if (!itemId || itemId === lastItemId) return;
     lastItemId = itemId;
 
-    // Try multiple selectors — different Jellyfin versions use different class names
     var containerSel = [
       '.mainDetailButtons',
       '.itemActions',
@@ -413,7 +454,7 @@
 
     waitForElement(containerSel, WAIT_TIMEOUT_MS, function () {
       if (getItemIdFromHash() === itemId) {
-        fetchAndInject(itemId);
+        checkAndInject(itemId);
       }
     });
   }
@@ -425,23 +466,20 @@
     };
   }
 
-  // ── Bootstrap ────────────────────────────────────────────────────────────
+  // ── Bootstrap ──────────────────────────────────────────────────────────────
 
-  // Load player-mode config from server, then start listening
-  loadConfig(function () {
-    var debouncedCheck = debounced(onMaybeNavigated);
+  var debouncedCheck = debounced(onMaybeNavigated);
 
-    window.addEventListener('hashchange', debouncedCheck);
+  window.addEventListener('hashchange', debouncedCheck);
 
-    var observer = new MutationObserver(debouncedCheck);
-    observer.observe(document.body, {
-      childList: true, subtree: true,
-      attributes: false, characterData: false
-    });
-
-    onMaybeNavigated();
-
-    console.log('[TrailerPlugin] Loaded v1.6 — mode=' + playerMode);
+  var observer = new MutationObserver(debouncedCheck);
+  observer.observe(document.body, {
+    childList: true, subtree: true,
+    attributes: false, characterData: false
   });
+
+  onMaybeNavigated();
+
+  console.log('[TrailerPlugin] Loaded v2.0 — YouTube search modal');
 
 })();

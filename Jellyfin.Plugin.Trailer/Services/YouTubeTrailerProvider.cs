@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading;
@@ -10,23 +11,22 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.Trailer.Services;
 
 /// <summary>
-/// Searches a specific YouTube channel for trailers using the YouTube Data API v3.
+/// Searches YouTube for trailers using the YouTube Data API v3.
 ///
-/// Flow:
-///   1. Resolve channel handle (@KinomanTrailers) → channel ID (UC...) — cached permanently
-///   2. Search within that channel for "{movieName} трейлер {year}"
-///   3. Return the first matching video URL
+/// Two modes:
+///   1. Channel search — searches a specific channel (e.g. @KinomanTrailers)
+///   2. General search — searches all of YouTube, returns multiple results for user selection
 ///
 /// YouTube Data API v3 free tier: 10,000 units/day.
-///   - channels.list (resolve handle) = 1 unit
-///   - search.list = 100 units
-///   → ~100 trailer searches per day, plenty for a personal Jellyfin server.
+///   - channels.list = 1 unit
+///   - search.list   = 100 units
+///   → ~100 searches per day, plenty for personal use.
 /// </summary>
 public class YouTubeTrailerProvider : IYouTubeTrailerProvider
 {
     private const string YtApiBase = "https://www.googleapis.com/youtube/v3";
 
-    /// <summary>Cache: channel handle → channel ID (never expires, handles don't change).</summary>
+    /// <summary>Cache: channel handle → channel ID (never expires).</summary>
     private static readonly ConcurrentDictionary<string, string> ChannelIdCache = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -49,7 +49,6 @@ public class YouTubeTrailerProvider : IYouTubeTrailerProvider
         string channelHandle,
         CancellationToken cancellationToken)
     {
-        // Step 1: resolve channel handle → channel ID
         var channelId = await ResolveChannelIdAsync(channelHandle, apiKey, cancellationToken)
             .ConfigureAwait(false);
 
@@ -59,7 +58,6 @@ public class YouTubeTrailerProvider : IYouTubeTrailerProvider
             return new TrailerResult();
         }
 
-        // Step 2: search within the channel
         var searchQuery = movieName + " трейлер";
         if (year.HasValue)
             searchQuery += " " + year.Value;
@@ -68,17 +66,131 @@ public class YouTubeTrailerProvider : IYouTubeTrailerProvider
             .ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Resolves a YouTube channel handle (e.g. "@KinomanTrailers") to a channel ID (e.g. "UC...").
-    /// Uses YouTube Data API v3: GET /channels?part=id&amp;forHandle=@handle
-    /// Result is cached permanently (handles don't change).
-    /// </summary>
-    private async Task<string?> ResolveChannelIdAsync(
-        string handle,
+    /// <inheritdoc />
+    public async Task<List<YouTubeSearchItem>> SearchAsync(
+        string movieName,
+        int? year,
         string apiKey,
+        int maxResults,
         CancellationToken cancellationToken)
     {
-        // Normalize: ensure handle starts with @
+        var results = new List<YouTubeSearchItem>();
+        if (maxResults < 1) maxResults = 1;
+        if (maxResults > 10) maxResults = 10;
+
+        var searchQuery = movieName + " трейлер";
+        if (year.HasValue)
+            searchQuery += " " + year.Value;
+
+        var url = $"{YtApiBase}/search?part=snippet"
+            + $"&q={Uri.EscapeDataString(searchQuery)}"
+            + "&type=video"
+            + $"&maxResults={maxResults}"
+            + "&relevanceLanguage=ru"
+            + $"&key={apiKey}";
+
+        _logger.LogInformation("YouTube general search for '{Query}', maxResults={Max}", searchQuery, maxResults);
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient("YouTube");
+            using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                _logger.LogWarning("YouTube search API HTTP {Status}: {Body}", (int)response.StatusCode, body);
+                return results;
+            }
+
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("items", out var items) || items.GetArrayLength() == 0)
+            {
+                _logger.LogInformation("YouTube: no results for '{Query}'", searchQuery);
+                return results;
+            }
+
+            foreach (var item in items.EnumerateArray())
+            {
+                var searchItem = ParseSearchItem(item);
+                if (searchItem != null)
+                {
+                    results.Add(searchItem);
+                    _logger.LogInformation("YouTube result: {Title} ({Channel}) — {VideoId}",
+                        searchItem.Title, searchItem.ChannelTitle, searchItem.VideoId);
+                }
+            }
+
+            _logger.LogInformation("YouTube: found {Count} results for '{Query}'", results.Count, searchQuery);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "YouTube: general search error for '{Query}'", searchQuery);
+        }
+
+        return results;
+    }
+
+    // ── Private helpers ──────────────────────────────────────────────────────
+
+    /// <summary>Parses a single YouTube search result item from the API response.</summary>
+    private static YouTubeSearchItem? ParseSearchItem(JsonElement item)
+    {
+        string? videoId = null;
+        string? title = null;
+        string? channelTitle = null;
+        string? thumbnailUrl = null;
+        string? publishedAt = null;
+
+        if (item.TryGetProperty("id", out var idObj)
+            && idObj.TryGetProperty("videoId", out var vidIdProp)
+            && vidIdProp.ValueKind == JsonValueKind.String)
+        {
+            videoId = vidIdProp.GetString();
+        }
+
+        if (string.IsNullOrEmpty(videoId))
+            return null;
+
+        if (item.TryGetProperty("snippet", out var snippet))
+        {
+            if (snippet.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String)
+                title = t.GetString();
+
+            if (snippet.TryGetProperty("channelTitle", out var ch) && ch.ValueKind == JsonValueKind.String)
+                channelTitle = ch.GetString();
+
+            if (snippet.TryGetProperty("publishedAt", out var pa) && pa.ValueKind == JsonValueKind.String)
+                publishedAt = pa.GetString();
+
+            // Prefer medium (320×180) thumbnail, fall back to default (120×90)
+            if (snippet.TryGetProperty("thumbnails", out var thumbs))
+            {
+                if (thumbs.TryGetProperty("medium", out var med) && med.TryGetProperty("url", out var medUrl))
+                    thumbnailUrl = medUrl.GetString();
+                else if (thumbs.TryGetProperty("default", out var def) && def.TryGetProperty("url", out var defUrl))
+                    thumbnailUrl = defUrl.GetString();
+            }
+        }
+
+        return new YouTubeSearchItem
+        {
+            VideoId = videoId!,
+            Title = title ?? string.Empty,
+            ChannelTitle = channelTitle ?? string.Empty,
+            ThumbnailUrl = thumbnailUrl ?? string.Empty,
+            PublishedAt = publishedAt ?? string.Empty
+        };
+    }
+
+    /// <summary>Resolves a YouTube channel handle → channel ID (cached permanently).</summary>
+    private async Task<string?> ResolveChannelIdAsync(
+        string handle, string apiKey, CancellationToken cancellationToken)
+    {
         if (!handle.StartsWith('@'))
             handle = "@" + handle;
 
@@ -127,23 +239,15 @@ public class YouTubeTrailerProvider : IYouTubeTrailerProvider
         }
     }
 
-    /// <summary>
-    /// Searches for videos within a specific YouTube channel.
-    /// Uses YouTube Data API v3: GET /search?part=snippet&amp;channelId=...&amp;q=...&amp;type=video
-    /// </summary>
+    /// <summary>Searches within a specific YouTube channel (single best result).</summary>
     private async Task<TrailerResult> SearchChannelAsync(
-        string channelId,
-        string query,
-        string movieName,
-        string apiKey,
-        CancellationToken cancellationToken)
+        string channelId, string query, string movieName,
+        string apiKey, CancellationToken cancellationToken)
     {
         var url = $"{YtApiBase}/search?part=snippet"
             + $"&channelId={Uri.EscapeDataString(channelId)}"
             + $"&q={Uri.EscapeDataString(query)}"
-            + "&type=video"
-            + "&maxResults=3"
-            + "&relevanceLanguage=ru"
+            + "&type=video&maxResults=3&relevanceLanguage=ru"
             + $"&key={apiKey}";
 
         _logger.LogInformation("YouTube: searching channel {ChannelId} for '{Query}'", channelId, query);
@@ -171,38 +275,20 @@ public class YouTubeTrailerProvider : IYouTubeTrailerProvider
                 return new TrailerResult();
             }
 
-            // Take the first result
-            var first = items[0];
-            string? videoId = null;
-            string? title = null;
-
-            if (first.TryGetProperty("id", out var idObj)
-                && idObj.TryGetProperty("videoId", out var vidIdProp)
-                && vidIdProp.ValueKind == JsonValueKind.String)
-            {
-                videoId = vidIdProp.GetString();
-            }
-
-            if (first.TryGetProperty("snippet", out var snippet)
-                && snippet.TryGetProperty("title", out var titleProp)
-                && titleProp.ValueKind == JsonValueKind.String)
-            {
-                title = titleProp.GetString();
-            }
-
-            if (string.IsNullOrEmpty(videoId))
+            var searchItem = ParseSearchItem(items[0]);
+            if (searchItem == null || string.IsNullOrEmpty(searchItem.VideoId))
             {
                 _logger.LogWarning("YouTube: search result has no videoId for '{Query}'", query);
                 return new TrailerResult();
             }
 
-            var videoUrl = $"https://www.youtube.com/watch?v={videoId}";
-            _logger.LogInformation("YouTube: found trailer for '{Movie}': {Url} ({Title})", movieName, videoUrl, title);
+            _logger.LogInformation("YouTube: found trailer for '{Movie}': {Url} ({Title})",
+                movieName, searchItem.VideoUrl, searchItem.Title);
 
             return new TrailerResult
             {
-                TrailerUrl = videoUrl,
-                Title = title,
+                TrailerUrl = searchItem.VideoUrl,
+                Title = searchItem.Title,
                 Source = TrailerSource.YouTube,
                 Language = "ru"
             };
