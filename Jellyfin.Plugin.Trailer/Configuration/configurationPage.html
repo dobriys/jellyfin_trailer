@@ -189,48 +189,72 @@
   var TrailerPluginConfig = {
     pluginId: '70788050-9f96-453d-a823-f41b7bd12712',
 
+    /** Case-insensitive property getter — works with both camelCase and PascalCase */
+    get: function (config, name) {
+      if (config[name] !== undefined) return config[name];
+      var lower = name.charAt(0).toLowerCase() + name.slice(1);
+      if (config[lower] !== undefined) return config[lower];
+      var upper = name.charAt(0).toUpperCase() + name.slice(1);
+      return config[upper];
+    },
+
+    /** Set property in both cases so server always picks it up */
+    set: function (config, name, value) {
+      config[name] = value;
+      config[name.charAt(0).toLowerCase() + name.slice(1)] = value;
+      config[name.charAt(0).toUpperCase() + name.slice(1)] = value;
+    },
+
     loadConfiguration: function () {
-      ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
-        console.log('[TrailerPlugin] config loaded:', JSON.stringify(config));
-        document.getElementById('TmdbApiKey').value           = config.tmdbApiKey || '';
-        document.getElementById('KinopoiskApiKey').value      = config.kinopoiskApiKey || '';
-        document.getElementById('PreferredLanguage').value    = config.preferredLanguage || 'ru-RU';
-        document.getElementById('PlayerMode').value           = config.playerMode || 'modal';
-        document.getElementById('FallbackToEnglish').checked  = config.fallbackToEnglish !== false;
-        document.getElementById('EnableKinopoisk').checked    = config.enableKinopoisk !== false;
-        document.getElementById('CacheDurationMinutes').value =
-          (config.cacheDurationMinutes !== undefined) ? config.cacheDurationMinutes : 60;
+      var self = TrailerPluginConfig;
+      ApiClient.getPluginConfiguration(self.pluginId).then(function (config) {
+        console.log('[TrailerPlugin] config keys:', Object.keys(config).join(', '));
+        console.log('[TrailerPlugin] config raw:', JSON.stringify(config));
+
+        document.getElementById('TmdbApiKey').value           = self.get(config, 'TmdbApiKey') || '';
+        document.getElementById('KinopoiskApiKey').value      = self.get(config, 'KinopoiskApiKey') || '';
+        document.getElementById('PreferredLanguage').value    = self.get(config, 'PreferredLanguage') || 'ru-RU';
+        document.getElementById('PlayerMode').value           = self.get(config, 'PlayerMode') || 'modal';
+        document.getElementById('FallbackToEnglish').checked  = self.get(config, 'FallbackToEnglish') !== false;
+        document.getElementById('EnableKinopoisk').checked    = self.get(config, 'EnableKinopoisk') !== false;
+
+        var cache = self.get(config, 'CacheDurationMinutes');
+        document.getElementById('CacheDurationMinutes').value = (cache !== undefined) ? cache : 60;
       }).catch(function (e) {
         console.error('[TrailerPlugin] load error', e);
       });
     },
 
     saveConfiguration: function () {
+      var self = TrailerPluginConfig;
       var btn = document.getElementById('TrailerSaveBtn');
       var status = document.getElementById('TrailerSaveStatus');
       btn.disabled = true;
       btn.textContent = 'Сохранение...';
 
-      ApiClient.getPluginConfiguration(TrailerPluginConfig.pluginId).then(function (config) {
-        config.tmdbApiKey           = document.getElementById('TmdbApiKey').value.trim();
-        config.kinopoiskApiKey      = document.getElementById('KinopoiskApiKey').value.trim();
-        config.preferredLanguage    = document.getElementById('PreferredLanguage').value;
-        config.playerMode           = document.getElementById('PlayerMode').value;
-        config.fallbackToEnglish    = document.getElementById('FallbackToEnglish').checked;
-        config.enableKinopoisk      = document.getElementById('EnableKinopoisk').checked;
-        config.cacheDurationMinutes = parseInt(document.getElementById('CacheDurationMinutes').value, 10) || 60;
-        return ApiClient.updatePluginConfiguration(TrailerPluginConfig.pluginId, config);
+      ApiClient.getPluginConfiguration(self.pluginId).then(function (config) {
+        self.set(config, 'TmdbApiKey',           document.getElementById('TmdbApiKey').value.trim());
+        self.set(config, 'KinopoiskApiKey',      document.getElementById('KinopoiskApiKey').value.trim());
+        self.set(config, 'PreferredLanguage',     document.getElementById('PreferredLanguage').value);
+        self.set(config, 'PlayerMode',            document.getElementById('PlayerMode').value);
+        self.set(config, 'FallbackToEnglish',     document.getElementById('FallbackToEnglish').checked);
+        self.set(config, 'EnableKinopoisk',       document.getElementById('EnableKinopoisk').checked);
+        self.set(config, 'CacheDurationMinutes',  parseInt(document.getElementById('CacheDurationMinutes').value, 10) || 60);
+
+        console.log('[TrailerPlugin] saving config:', JSON.stringify(config));
+        return ApiClient.updatePluginConfiguration(self.pluginId, config);
       }).then(function () {
         btn.disabled = false;
         btn.textContent = 'Сохранить';
         status.textContent = '✓ Настройки сохранены';
+        status.style.color = '#4CAF50';
         status.style.display = 'block';
         setTimeout(function () { status.style.display = 'none'; }, 3000);
       }).catch(function (err) {
         console.error('[TrailerPlugin] save error', err);
         btn.disabled = false;
         btn.textContent = 'Сохранить';
-        status.textContent = '✗ Ошибка сохранения — проверьте консоль';
+        status.textContent = '✗ Ошибка сохранения — ' + (err.message || err);
         status.style.color = '#f44336';
         status.style.display = 'block';
       });
