@@ -132,6 +132,30 @@ public class TrailerService : ITrailerService
                 _logger.LogInformation("Kinopoisk trailer found for '{Title}': {Url}", item.Name, result.TrailerUrl);
         }
 
+        // ---- YouTube search fallback -------------------------------------------
+        // When no direct trailer URL was found from any provider,
+        // generate a YouTube search URL so the user can find the trailer manually.
+        if (!result.Found && !string.IsNullOrEmpty(item.Name))
+        {
+            var searchQuery = item.Name + " трейлер";
+            if (item.ProductionYear.HasValue)
+                searchQuery += " " + item.ProductionYear.Value;
+
+            var ytSearchUrl = "https://www.youtube.com/results?search_query="
+                              + Uri.EscapeDataString(searchQuery);
+
+            result = new TrailerResult
+            {
+                TrailerUrl = ytSearchUrl,
+                Title = "Поиск трейлера на YouTube",
+                Source = TrailerSource.YouTubeSearch,
+                Language = "ru"
+            };
+
+            _logger.LogInformation("No direct trailer found for '{Title}', using YouTube search fallback: {Url}",
+                item.Name, ytSearchUrl);
+        }
+
         if (!result.Found)
             _logger.LogWarning("No trailer found for '{Title}' (id={ItemId})", item.Name, itemId);
 

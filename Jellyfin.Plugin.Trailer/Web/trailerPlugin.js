@@ -328,7 +328,10 @@
       })
       .then(function (data) {
         if (data && data.found && data.trailerUrl) {
-          injectButton(data.trailerUrl, playerMode);
+          // YouTubeSearch source always opens in a new tab (it's a search page, not a video)
+          var mode = (data.source === 'YouTubeSearch') ? 'tab' : playerMode;
+          console.log('[TrailerPlugin] Trailer found:', data.source, mode, data.trailerUrl);
+          injectButton(data.trailerUrl, mode);
         }
       })
       .catch(function (err) {
@@ -399,7 +402,7 @@
 
     onMaybeNavigated();
 
-    console.log('[TrailerPlugin] Loaded v1.3 — mode=' + playerMode);
+    console.log('[TrailerPlugin] Loaded v1.4 — mode=' + playerMode);
   });
 
 })();

@@ -10,5 +10,8 @@ public enum TrailerSource
     Tmdb,
 
     /// <summary>Trailer was sourced from the Kinopoisk Unofficial API.</summary>
-    Kinopoisk
+    Kinopoisk,
+
+    /// <summary>Fallback YouTube search URL (no direct trailer found).</summary>
+    YouTubeSearch
 }
