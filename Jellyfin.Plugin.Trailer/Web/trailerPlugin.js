@@ -43,14 +43,29 @@
   }
 
   /**
+   * Extracts YouTube video ID from any YouTube URL format.
+   *   https://www.youtube.com/watch?v=XXXX  →  XXXX
+   *   https://youtu.be/XXXX                 →  XXXX
+   */
+  function getYouTubeVideoId(url) {
+    try {
+      var match = url.match(/[?&]v=([A-Za-z0-9_-]{11})/)
+              || url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+      return match ? match[1] : null;
+    } catch (e) { return null; }
+  }
+
+  /**
    * Converts any YouTube watch URL to an embed URL.
-   *   https://www.youtube.com/watch?v=XXXX  →  https://www.youtube.com/embed/XXXX
+   * Includes origin parameter to prevent Error 153 (embedding restrictions).
    */
   function toEmbedUrl(url) {
-    try {
-      var match = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-      if (match) return 'https://www.youtube.com/embed/' + match[1] + '?autoplay=1&rel=0';
-    } catch (e) { /* ignore */ }
+    var videoId = getYouTubeVideoId(url);
+    if (videoId) {
+      var origin = window.location.protocol + '//' + window.location.host;
+      return 'https://www.youtube-nocookie.com/embed/' + videoId
+        + '?autoplay=1&rel=0&origin=' + encodeURIComponent(origin);
+    }
     return url;
   }
 
@@ -145,16 +160,26 @@
       closeModal();
     });
 
-    // ── Media element: YouTube iframe OR HTML5 video (proxied through server)
+    // ── Media element: YouTube iframe OR HTML5 video
     var media;
     if (youtube) {
       media = document.createElement('iframe');
       media.src = toEmbedUrl(trailerUrl);
+      // Use 'allow' attribute only — do NOT add 'allowfullscreen' separately to avoid conflict
       media.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
-      media.setAttribute('allowfullscreen', '');
       media.setAttribute('frameborder', '0');
       media.style.cssText = 'width:100%;height:100%;display:block;border:0;';
       media.title = 'Трейлер';
+
+      // If embed fails (Error 153 = embedding restricted by uploader),
+      // show a fallback link to open in a new tab
+      media.addEventListener('load', function () {
+        try {
+          // We can't read cross-origin iframe content, but we can detect
+          // if the iframe shows an error by checking its dimensions after load.
+          // As a simple fallback, add a "open in new tab" link below the iframe.
+        } catch (e) { /* ignore */ }
+      });
     } else {
       // Direct video URL — proxy through Jellyfin server to avoid browser CORS/access issues
       var proxyUrl = '/Trailer/proxy?url=' + encodeURIComponent(trailerUrl);
@@ -186,8 +211,24 @@
         });
     }
 
+    // ── "Open in new tab" fallback link (for YouTube embeds that may be restricted)
+    if (youtube) {
+      var fallbackLink = document.createElement('a');
+      fallbackLink.href = trailerUrl;
+      fallbackLink.target = '_blank';
+      fallbackLink.rel = 'noopener noreferrer';
+      fallbackLink.style.cssText = [
+        'position:absolute', 'bottom:-32px', 'left:0', 'right:0',
+        'text-align:center', 'color:#aaa', 'font-size:13px',
+        'text-decoration:underline', 'cursor:pointer'
+      ].join(';');
+      fallbackLink.textContent = 'Открыть на YouTube ↗';
+      wrap.style.marginBottom = '40px';
+    }
+
     wrap.appendChild(closeBtn);
     wrap.appendChild(media);
+    if (youtube && fallbackLink) wrap.appendChild(fallbackLink);
     overlay.appendChild(wrap);
 
     // Close on backdrop click (outside the video box)
@@ -400,7 +441,7 @@
 
     onMaybeNavigated();
 
-    console.log('[TrailerPlugin] Loaded v1.5 — mode=' + playerMode);
+    console.log('[TrailerPlugin] Loaded v1.6 — mode=' + playerMode);
   });
 
 })();
