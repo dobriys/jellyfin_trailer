@@ -626,7 +626,7 @@ public class TrailerController : ControllerBase
     /// <response code="400">Missing or invalid URL.</response>
     /// <response code="502">Upstream server error.</response>
     [HttpGet("proxy")]
-    [Authorize]
+    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status502BadGateway)]
@@ -640,6 +640,15 @@ public class TrailerController : ControllerBase
         // Only allow http/https schemes to prevent SSRF
         if (uri.Scheme != "http" && uri.Scheme != "https")
             return BadRequest("Only http/https URLs are supported");
+
+        // Restrict to YouTube/Google video domains to prevent open proxy abuse
+        var host = uri.Host;
+        if (!host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase)
+            && !host.EndsWith(".youtube.com", StringComparison.OrdinalIgnoreCase)
+            && !host.EndsWith(".ytimg.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("Only YouTube/Google video URLs are allowed");
+        }
 
         _logger.LogInformation("Proxying video: {Url}", url);
 
