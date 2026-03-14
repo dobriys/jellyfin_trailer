@@ -262,8 +262,8 @@
 
   /**
    * Switch the modal to the video player.
-   * Uses YouTube embed iframe via youtube-nocookie.com.
-   * Key fix: NO origin parameter — that was causing Error 153 on local IPs.
+   * Resolves stream URL via server (watch page scrape / player API / Invidious),
+   * then plays via HTML5 <video> through /Trailer/proxy.
    */
   function showPlayer(contentArea, panel, header, allItems, selectedItem) {
     // Widen the panel for the player
@@ -292,19 +292,11 @@
     var playerWrap = document.createElement('div');
     playerWrap.className = 'trailer-player-wrap';
 
-    // YouTube embed iframe — NO origin parameter!
-    var embedUrl = 'https://www.youtube-nocookie.com/embed/' + selectedItem.videoId
-      + '?autoplay=1&rel=0&modestbranding=1';
-
-    var iframe = document.createElement('iframe');
-    iframe.src = embedUrl;
-    iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-    iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
-    iframe.setAttribute('allowfullscreen', '');
-    iframe.setAttribute('referrerpolicy', 'no-referrer');
-    iframe.title = selectedItem.title || 'Трейлер';
-
-    playerWrap.appendChild(iframe);
+    // Loading indicator
+    var loadingEl = document.createElement('div');
+    loadingEl.className = 'trailer-modal-loading';
+    loadingEl.textContent = 'Загрузка видео...';
+    playerWrap.appendChild(loadingEl);
 
     // Now playing title
     var nowPlaying = document.createElement('div');
@@ -330,6 +322,50 @@
     contentArea.appendChild(nowPlaying);
     contentArea.appendChild(channelInfo);
     contentArea.appendChild(fallback);
+
+    // ── Resolve stream via server ──
+    var auth = getAuthHeader();
+    if (!auth) {
+      loadingEl.textContent = 'Нет токена авторизации';
+      return;
+    }
+
+    fetch(API_PATH + 'stream/' + selectedItem.videoId, { headers: { 'Authorization': auth } })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data || !data.streamUrl) throw new Error('No stream URL');
+        console.log('[TrailerPlugin] Stream resolved: ' + data.quality + ' via ' + data.source);
+
+        playerWrap.innerHTML = '';
+
+        var video = document.createElement('video');
+        video.controls = true;
+        video.autoplay = true;
+        video.style.cssText = 'width:100%;height:100%;display:block;background:#000;';
+        video.title = selectedItem.title || 'Трейлер';
+        video.src = data.streamUrl;
+
+        video.addEventListener('error', function () {
+          console.warn('[TrailerPlugin] HTML5 video error');
+          playerWrap.innerHTML = '';
+          var errMsg = document.createElement('div');
+          errMsg.className = 'trailer-modal-empty';
+          errMsg.innerHTML = 'Не удалось воспроизвести.<br><a href="' +
+            (selectedItem.videoUrl || 'https://www.youtube.com/watch?v=' + selectedItem.videoId) +
+            '" target="_blank" rel="noopener" style="color:#6cf">Открыть на YouTube \u2197</a>';
+          playerWrap.appendChild(errMsg);
+        });
+
+        playerWrap.appendChild(video);
+      })
+      .catch(function (err) {
+        console.error('[TrailerPlugin] Stream error:', err);
+        loadingEl.textContent = 'Не удалось получить видео.';
+        loadingEl.style.color = '#e74c3c';
+      });
   }
 
   // ── Button ─────────────────────────────────────────────────────────────────
@@ -476,6 +512,6 @@
 
   onMaybeNavigated();
 
-  console.log('[TrailerPlugin] Loaded v3.1 — YouTube embed (no origin param)');
+  console.log('[TrailerPlugin] Loaded v3.2 — server-side stream (watch page scrape + player API)');
 
 })();

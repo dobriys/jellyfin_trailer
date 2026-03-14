@@ -4,6 +4,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
 using System.Net.Mime;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Trailer.Models;
@@ -173,11 +174,9 @@ public class TrailerController : ControllerBase
 
     /// <summary>
     /// Resolves a direct video stream URL for a YouTube video.
-    /// Uses YouTube's internal player API directly (no third-party dependencies).
+    /// Uses multiple strategies: watch page scraping, player API, Invidious.
     /// Returns a proxied URL that the client can play via HTML5 &lt;video&gt;.
     /// </summary>
-    /// <param name="videoId">YouTube video ID (11 chars).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
     [HttpGet("stream/{videoId}")]
     [Authorize]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -190,29 +189,221 @@ public class TrailerController : ControllerBase
         if (string.IsNullOrWhiteSpace(videoId) || videoId.Length != 11)
             return BadRequest("Valid 11-character YouTube video ID is required");
 
-        // ── Strategy 1: YouTube's internal player API (most reliable) ──
-        var result = await TryYouTubePlayerApi(videoId, cancellationToken).ConfigureAwait(false);
-        if (result != null)
-            return Ok(result);
+        // ── Strategy 1: Scrape YouTube watch page (most reliable, like yt-dlp) ──
+        var result = await TryWatchPageScrape(videoId, cancellationToken).ConfigureAwait(false);
+        if (result != null) return Ok(result);
 
-        // ── Strategy 2: Invidious API fallback ──
+        // ── Strategy 2: YouTube player API with TV embedded client ──
+        result = await TryYouTubePlayerApi(videoId, "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0", cancellationToken).ConfigureAwait(false);
+        if (result != null) return Ok(result);
+
+        // ── Strategy 3: YouTube player API with ANDROID client ──
+        result = await TryYouTubePlayerApi(videoId, "ANDROID", "19.09.37", cancellationToken).ConfigureAwait(false);
+        if (result != null) return Ok(result);
+
+        // ── Strategy 4: Invidious fallback ──
         result = await TryInvidiousApi(videoId, cancellationToken).ConfigureAwait(false);
-        if (result != null)
-            return Ok(result);
+        if (result != null) return Ok(result);
 
-        return StatusCode(502, "Could not resolve video stream");
+        return StatusCode(502, "Could not resolve video stream from any source");
     }
 
-    private async Task<object?> TryYouTubePlayerApi(string videoId, CancellationToken ct)
+    /// <summary>
+    /// Debug endpoint — shows what each strategy returns for a video.
+    /// Helps diagnose stream resolution failures.
+    /// </summary>
+    [HttpGet("debug/{videoId}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> DebugStream(
+        [FromRoute][Required] string videoId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(videoId) || videoId.Length != 11)
+            return BadRequest("Valid 11-character YouTube video ID is required");
+
+        var results = new Dictionary<string, object?>();
+
+        // Test watch page scrape
+        try
+        {
+            var client = _httpClientFactory.CreateClient("TrailerProxy");
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"https://www.youtube.com/watch?v={videoId}");
+            req.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            req.Headers.Add("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8");
+
+            var resp = await client.SendAsync(req, cancellationToken).ConfigureAwait(false);
+            var html = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            var playerJson = ExtractPlayerResponse(html);
+            if (playerJson != null)
+            {
+                using var doc = JsonDocument.Parse(playerJson);
+                var playability = doc.RootElement.TryGetProperty("playabilityStatus", out var ps)
+                    ? (ps.TryGetProperty("status", out var st) ? st.GetString() : "unknown")
+                    : "not found";
+                var hasSd = doc.RootElement.TryGetProperty("streamingData", out var sd);
+                int formatCount = 0;
+                int adaptiveCount = 0;
+                if (hasSd)
+                {
+                    if (sd.TryGetProperty("formats", out var fmts))
+                        formatCount = fmts.GetArrayLength();
+                    if (sd.TryGetProperty("adaptiveFormats", out var af))
+                        adaptiveCount = af.GetArrayLength();
+                }
+
+                results["watchPage"] = new
+                {
+                    status = (int)resp.StatusCode,
+                    htmlLength = html.Length,
+                    playabilityStatus = playability,
+                    muxedFormats = formatCount,
+                    adaptiveFormats = adaptiveCount,
+                    hasDirectUrls = formatCount > 0 || adaptiveCount > 0
+                };
+            }
+            else
+            {
+                results["watchPage"] = new { status = (int)resp.StatusCode, htmlLength = html.Length, error = "ytInitialPlayerResponse not found in HTML" };
+            }
+        }
+        catch (Exception ex)
+        {
+            results["watchPage"] = new { error = ex.Message };
+        }
+
+        // Test player API
+        foreach (var clientName in new[] { "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "ANDROID" })
+        {
+            try
+            {
+                var client = _httpClientFactory.CreateClient("TrailerProxy");
+                var payload = BuildPlayerPayload(videoId, clientName, clientName == "ANDROID" ? "19.09.37" : "2.0");
+                using var req = new HttpRequestMessage(HttpMethod.Post, "https://www.youtube.com/youtubei/v1/player")
+                {
+                    Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json")
+                };
+                req.Headers.Add("User-Agent", clientName == "ANDROID"
+                    ? "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
+                    : "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 Chrome/79.0.3945.130 Safari/537.36");
+
+                var resp = await client.SendAsync(req, cancellationToken).ConfigureAwait(false);
+                var json = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+                if (resp.IsSuccessStatusCode)
+                {
+                    using var doc = JsonDocument.Parse(json);
+                    var playability = doc.RootElement.TryGetProperty("playabilityStatus", out var ps)
+                        ? (ps.TryGetProperty("status", out var st) ? st.GetString() : "unknown")
+                        : "not found";
+                    var reason = doc.RootElement.TryGetProperty("playabilityStatus", out var ps2)
+                        && ps2.TryGetProperty("reason", out var r) ? r.GetString() : null;
+
+                    results[$"playerApi_{clientName}"] = new { status = (int)resp.StatusCode, playabilityStatus = playability, reason };
+                }
+                else
+                {
+                    results[$"playerApi_{clientName}"] = new { status = (int)resp.StatusCode, body = json.Length > 500 ? json[..500] : json };
+                }
+            }
+            catch (Exception ex)
+            {
+                results[$"playerApi_{clientName}"] = new { error = ex.Message };
+            }
+        }
+
+        return Ok(results);
+    }
+
+    private async Task<object?> TryWatchPageScrape(string videoId, CancellationToken ct)
     {
         try
         {
             var client = _httpClientFactory.CreateClient("TrailerProxy");
 
-            // YouTube's internal player API — works server-to-server without auth
-            var playerUrl = "https://www.youtube.com/youtubei/v1/player";
+            var watchUrl = $"https://www.youtube.com/watch?v={videoId}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, watchUrl);
+            request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            request.Headers.Add("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8");
+            request.Headers.Add("Accept", "text/html,application/xhtml+xml");
 
-            var payload = new
+            _logger.LogInformation("Scraping YouTube watch page for {VideoId}", videoId);
+
+            var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("YouTube watch page returned {Status} for {VideoId}", (int)response.StatusCode, videoId);
+                return null;
+            }
+
+            var html = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            _logger.LogInformation("YouTube watch page fetched: {Length} chars for {VideoId}", html.Length, videoId);
+
+            var playerJson = ExtractPlayerResponse(html);
+            if (playerJson == null)
+            {
+                _logger.LogWarning("ytInitialPlayerResponse not found in HTML for {VideoId}", videoId);
+                return null;
+            }
+
+            return ParseStreamingData(playerJson, videoId, "watch-page");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Watch page scrape failed for {VideoId}", videoId);
+        }
+
+        return null;
+    }
+
+    private async Task<object?> TryYouTubePlayerApi(string videoId, string clientName, string clientVersion, CancellationToken ct)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient("TrailerProxy");
+
+            var payload = BuildPlayerPayload(videoId, clientName, clientVersion);
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://www.youtube.com/youtubei/v1/player")
+            {
+                Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json")
+            };
+
+            // Use appropriate User-Agent for each client
+            var ua = clientName switch
+            {
+                "ANDROID" => "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
+                "TVHTML5_SIMPLY_EMBEDDED_PLAYER" => "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 Chrome/79.0.3945.130 Safari/537.36",
+                _ => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+            };
+            request.Headers.Add("User-Agent", ua);
+
+            _logger.LogInformation("Trying YouTube player API ({Client}) for {VideoId}", clientName, videoId);
+
+            var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("YouTube player API ({Client}) returned {Status}", clientName, (int)response.StatusCode);
+                return null;
+            }
+
+            var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return ParseStreamingData(json, videoId, $"player-api-{clientName}");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "YouTube player API ({Client}) failed for {VideoId}", clientName, videoId);
+        }
+
+        return null;
+    }
+
+    private static string BuildPlayerPayload(string videoId, string clientName, string clientVersion)
+    {
+        // Build the payload manually to handle different client configs
+        if (clientName == "ANDROID")
+        {
+            return JsonSerializer.Serialize(new
             {
                 videoId,
                 context = new
@@ -220,86 +411,138 @@ public class TrailerController : ControllerBase
                     client = new
                     {
                         clientName = "ANDROID",
-                        clientVersion = "19.09.37",
+                        clientVersion,
                         androidSdkVersion = 30,
                         hl = "ru",
                         gl = "RU"
                     }
                 }
-            };
-
-            var jsonPayload = JsonSerializer.Serialize(payload);
-            using var request = new HttpRequestMessage(HttpMethod.Post, playerUrl)
-            {
-                Content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json")
-            };
-            request.Headers.Add("User-Agent", "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip");
-
-            _logger.LogInformation("Resolving stream via YouTube player API for {VideoId}", videoId);
-
-            var response = await client.SendAsync(request, ct).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("YouTube player API returned {Status}", (int)response.StatusCode);
-                return null;
-            }
-
-            var json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(json);
-
-            // Check playability
-            if (doc.RootElement.TryGetProperty("playabilityStatus", out var status))
-            {
-                var statusStr = status.TryGetProperty("status", out var s) ? s.GetString() : "";
-                if (statusStr != "OK")
-                {
-                    _logger.LogWarning("YouTube player API: video {VideoId} status={Status}", videoId, statusStr);
-                    return null;
-                }
-            }
-
-            // Extract streaming data — look for combined (muxed) formats
-            if (!doc.RootElement.TryGetProperty("streamingData", out var streamingData))
-            {
-                _logger.LogWarning("YouTube player API: no streamingData for {VideoId}", videoId);
-                return null;
-            }
-
-            string? bestUrl = null;
-            string? bestQuality = null;
-
-            // formats = muxed audio+video (ready to play in <video>)
-            if (streamingData.TryGetProperty("formats", out var formats))
-            {
-                foreach (var fmt in formats.EnumerateArray())
-                {
-                    var url = fmt.TryGetProperty("url", out var u) ? u.GetString() : null;
-                    if (string.IsNullOrEmpty(url)) continue;
-
-                    var quality = fmt.TryGetProperty("qualityLabel", out var q) ? q.GetString() : "";
-
-                    if (bestUrl == null || (quality != null && quality.Contains("720")))
-                    {
-                        bestUrl = url;
-                        bestQuality = quality;
-                    }
-                }
-            }
-
-            if (!string.IsNullOrEmpty(bestUrl))
-            {
-                _logger.LogInformation("YouTube player API resolved {Quality} for {VideoId}", bestQuality, videoId);
-                var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(bestUrl);
-                return new { streamUrl = proxyUrl, quality = bestQuality, source = "youtube-api" };
-            }
-
-            _logger.LogWarning("YouTube player API: no muxed formats for {VideoId}", videoId);
+            });
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+
+        return JsonSerializer.Serialize(new
         {
-            _logger.LogWarning(ex, "YouTube player API failed for {VideoId}", videoId);
+            videoId,
+            context = new
+            {
+                client = new
+                {
+                    clientName,
+                    clientVersion,
+                    hl = "ru",
+                    gl = "RU"
+                }
+            }
+        });
+    }
+
+    /// <summary>Extracts ytInitialPlayerResponse JSON from YouTube watch page HTML.</summary>
+    private static string? ExtractPlayerResponse(string html)
+    {
+        // Look for: var ytInitialPlayerResponse = {...};
+        var marker = "var ytInitialPlayerResponse = ";
+        var startIdx = html.IndexOf(marker, StringComparison.Ordinal);
+        if (startIdx < 0)
+        {
+            // Try alternate pattern (sometimes in different format)
+            marker = "ytInitialPlayerResponse = ";
+            startIdx = html.IndexOf(marker, StringComparison.Ordinal);
+            if (startIdx < 0) return null;
         }
 
+        startIdx += marker.Length;
+
+        // Find matching closing brace using depth counting
+        if (startIdx >= html.Length || html[startIdx] != '{') return null;
+
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+
+        for (int i = startIdx; i < html.Length; i++)
+        {
+            char c = html[i];
+
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\') { escaped = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+
+            if (c == '{') depth++;
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                    return html.Substring(startIdx, i - startIdx + 1);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Parses streamingData from YouTube player response JSON and returns best muxed stream URL.</summary>
+    private object? ParseStreamingData(string json, string videoId, string source)
+    {
+        using var doc = JsonDocument.Parse(json);
+
+        // Check playability
+        if (doc.RootElement.TryGetProperty("playabilityStatus", out var status))
+        {
+            var statusStr = status.TryGetProperty("status", out var s) ? s.GetString() : "";
+            var reason = status.TryGetProperty("reason", out var r) ? r.GetString() : "";
+            if (statusStr != "OK")
+            {
+                _logger.LogWarning("{Source}: video {VideoId} status={Status} reason={Reason}",
+                    source, videoId, statusStr, reason);
+                return null;
+            }
+        }
+
+        if (!doc.RootElement.TryGetProperty("streamingData", out var streamingData))
+        {
+            _logger.LogWarning("{Source}: no streamingData for {VideoId}", source, videoId);
+            return null;
+        }
+
+        string? bestUrl = null;
+        string? bestQuality = null;
+
+        // formats = muxed audio+video (ready for <video>)
+        if (streamingData.TryGetProperty("formats", out var formats))
+        {
+            foreach (var fmt in formats.EnumerateArray())
+            {
+                // Direct URL (no signature cipher)
+                var url = fmt.TryGetProperty("url", out var u) ? u.GetString() : null;
+                if (string.IsNullOrEmpty(url))
+                {
+                    // signatureCipher requires JS player to decode — skip for now
+                    if (fmt.TryGetProperty("signatureCipher", out _))
+                    {
+                        _logger.LogInformation("{Source}: format has signatureCipher, skipping", source);
+                    }
+                    continue;
+                }
+
+                var quality = fmt.TryGetProperty("qualityLabel", out var q) ? q.GetString() : "";
+                var mimeType = fmt.TryGetProperty("mimeType", out var m) ? m.GetString() : "";
+
+                if (bestUrl == null || (quality != null && quality.Contains("720")))
+                {
+                    bestUrl = url;
+                    bestQuality = quality;
+                }
+            }
+        }
+
+        if (!string.IsNullOrEmpty(bestUrl))
+        {
+            _logger.LogInformation("{Source}: resolved {Quality} for {VideoId}", source, bestQuality, videoId);
+            var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(bestUrl);
+            return new { streamUrl = proxyUrl, quality = bestQuality, source };
+        }
+
+        _logger.LogWarning("{Source}: no usable muxed formats for {VideoId}", source, videoId);
         return null;
     }
 
@@ -323,7 +566,7 @@ public class TrailerController : ControllerBase
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
                 request.Headers.Add("Accept", "application/json");
-                request.Headers.Add("User-Agent", "Jellyfin-Trailer-Plugin/1.0");
+                request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36");
 
                 var response = await client.SendAsync(request, ct).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
@@ -404,6 +647,14 @@ public class TrailerController : ControllerBase
         {
             var client = _httpClientFactory.CreateClient("TrailerProxy");
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+
+            // Forward Range header for video seeking support
+            if (Request.Headers.ContainsKey("Range"))
+            {
+                request.Headers.TryAddWithoutValidation("Range", Request.Headers["Range"].ToString());
+            }
+
             var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -416,7 +667,18 @@ public class TrailerController : ControllerBase
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "video/mp4";
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
-            // Stream the video directly to the client
+            // Forward content range headers for seeking
+            if (response.Content.Headers.ContentRange != null)
+            {
+                Response.Headers["Content-Range"] = response.Content.Headers.ContentRange.ToString();
+            }
+            if (response.Headers.Contains("Accept-Ranges"))
+            {
+                Response.Headers["Accept-Ranges"] = "bytes";
+            }
+
+            var statusCode = (int)response.StatusCode;
+            Response.StatusCode = statusCode;
             return File(stream, contentType, enableRangeProcessing: true);
         }
         catch (HttpRequestException ex)
