@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "1.0.22.0",
+        "checksum": "23f31b197c441f9c9f71f87830674d86",
+        "changelog": "v1.0.22.0: iframe embed without origin param (fix Error 153)",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/dobriys/jellyfin_trailer/releases/download/v1.0.22.0/Jellyfin.Plugin.Trailer_1.0.22.0.zip",
+        "timestamp": "2026-03-14T08:50:42Z"
+      },
+      {
         "version": "1.0.21.0",
         "checksum": "0fb8f46f3fe6fc8636faf3cbc49e0626",
         "changelog": "Initial release — встроенный YouTube плеер в Jellyfin",

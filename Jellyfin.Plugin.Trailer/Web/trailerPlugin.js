@@ -1,14 +1,14 @@
 /**
- * Jellyfin Trailer Plugin — Client Side  v2.0
+ * Jellyfin Trailer Plugin — Client Side  v3.1
  *
  * Injects a "Трейлер" button on movie detail pages.
  * Clicking the button opens a modal with YouTube search results.
- * User picks a trailer from the list → it plays inside the modal.
+ * User picks a trailer from the list → it plays via iframe embed in same modal.
  *
  * Flow:
  *   1. Button click → GET /Trailer/{itemId}/search → list of YouTube results
  *   2. Modal shows scrollable list with thumbnails, titles, channel names
- *   3. User clicks a result → try YouTube embed in same modal
+ *   3. User clicks a result → YouTube embed (youtube-nocookie, no origin param)
  *   4. If embed fails → "Открыть на YouTube" fallback link
  */
 (function () {
@@ -29,9 +29,8 @@
   var debounceTimer = null;
 
   // ── Playback ──────────────────────────────────────────────────────────────
-  // Video playback uses server-side stream resolution via Invidious API.
-  // The server resolves direct video URLs and proxies them through /Trailer/proxy.
-  // No iframes or embed hosts needed — plays via HTML5 <video>.
+  // Video playback uses YouTube embed iframe via youtube-nocookie.com.
+  // Key: NO origin parameter — that was causing Error 153.
 
   /** Format ISO date → "12 Декабря 2014" */
   function formatDate(isoStr) {
@@ -263,9 +262,8 @@
 
   /**
    * Switch the modal to the video player.
-   * Uses server-side stream resolution via Invidious API → HTML5 <video>.
-   * The server fetches the direct stream URL and proxies it to the client.
-   * No iframes, no YouTube embed restrictions.
+   * Uses YouTube embed iframe via youtube-nocookie.com.
+   * Key fix: NO origin parameter — that was causing Error 153 on local IPs.
    */
   function showPlayer(contentArea, panel, header, allItems, selectedItem) {
     // Widen the panel for the player
@@ -294,11 +292,19 @@
     var playerWrap = document.createElement('div');
     playerWrap.className = 'trailer-player-wrap';
 
-    // Loading indicator
-    var loadingEl = document.createElement('div');
-    loadingEl.className = 'trailer-modal-loading';
-    loadingEl.textContent = 'Загрузка видео...';
-    playerWrap.appendChild(loadingEl);
+    // YouTube embed iframe — NO origin parameter!
+    var embedUrl = 'https://www.youtube-nocookie.com/embed/' + selectedItem.videoId
+      + '?autoplay=1&rel=0&modestbranding=1';
+
+    var iframe = document.createElement('iframe');
+    iframe.src = embedUrl;
+    iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+    iframe.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+    iframe.title = selectedItem.title || 'Трейлер';
+
+    playerWrap.appendChild(iframe);
 
     // Now playing title
     var nowPlaying = document.createElement('div');
@@ -309,7 +315,7 @@
     channelInfo.style.cssText = 'padding:0 16px 10px;color:#888;font-size:12px;';
     channelInfo.textContent = [selectedItem.channelTitle, formatDate(selectedItem.publishedAt)].filter(Boolean).join(' \u2022 ');
 
-    // Fallback link (always visible)
+    // Fallback link
     var fallback = document.createElement('div');
     fallback.className = 'trailer-player-fallback';
     var link = document.createElement('a');
@@ -324,57 +330,6 @@
     contentArea.appendChild(nowPlaying);
     contentArea.appendChild(channelInfo);
     contentArea.appendChild(fallback);
-
-    // ── Resolve stream via server-side Invidious API ──
-    var auth = getAuthHeader();
-    if (!auth) {
-      loadingEl.textContent = 'Нет токена авторизации';
-      return;
-    }
-
-    fetch(API_PATH + 'stream/' + selectedItem.videoId, { headers: { 'Authorization': auth } })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data || !data.streamUrl) throw new Error('No stream URL');
-        console.log('[TrailerPlugin] Stream resolved: ' + data.quality + ' via ' + data.source);
-
-        playerWrap.innerHTML = '';
-
-        var video = document.createElement('video');
-        video.controls = true;
-        video.autoplay = true;
-        video.style.cssText = 'width:100%;height:100%;display:block;background:#000;';
-        video.title = selectedItem.title || 'Трейлер';
-
-        // Use the proxied stream URL from Jellyfin server
-        video.src = data.streamUrl;
-
-        video.addEventListener('error', function () {
-          console.warn('[TrailerPlugin] HTML5 video error, showing fallback');
-          playerWrap.innerHTML = '';
-          var errMsg = document.createElement('div');
-          errMsg.className = 'trailer-modal-empty';
-          errMsg.innerHTML = 'Не удалось воспроизвести видео.<br><a href="' +
-            (selectedItem.videoUrl || 'https://www.youtube.com/watch?v=' + selectedItem.videoId) +
-            '" target="_blank" rel="noopener" style="color:#6cf">Открыть на YouTube \u2197</a>';
-          playerWrap.appendChild(errMsg);
-        });
-
-        playerWrap.appendChild(video);
-      })
-      .catch(function (err) {
-        console.error('[TrailerPlugin] Stream resolve error:', err);
-        playerWrap.innerHTML = '';
-        var errMsg = document.createElement('div');
-        errMsg.className = 'trailer-modal-empty';
-        errMsg.innerHTML = 'Не удалось получить видео поток.<br><a href="' +
-          (selectedItem.videoUrl || 'https://www.youtube.com/watch?v=' + selectedItem.videoId) +
-          '" target="_blank" rel="noopener" style="color:#6cf">Открыть на YouTube \u2197</a>';
-        playerWrap.appendChild(errMsg);
-      });
   }
 
   // ── Button ─────────────────────────────────────────────────────────────────
@@ -521,6 +476,6 @@
 
   onMaybeNavigated();
 
-  console.log('[TrailerPlugin] Loaded v3.0 — server-side stream via Invidious API + HTML5 video');
+  console.log('[TrailerPlugin] Loaded v3.1 — YouTube embed (no origin param)');
 
 })();
