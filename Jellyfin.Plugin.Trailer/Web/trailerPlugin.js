@@ -1,5 +1,5 @@
 /**
- * Jellyfin Trailer Plugin — Client Side  v3.1
+ * Jellyfin Trailer Plugin — Client Side  v3.2
  *
  * Injects a "Трейлер" button on movie detail pages.
  * Clicking the button opens a modal with YouTube search results.

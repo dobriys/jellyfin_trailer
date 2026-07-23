@@ -11,17 +11,6 @@ namespace Jellyfin.Plugin.Trailer.Services;
 public interface IYouTubeTrailerProvider
 {
     /// <summary>
-    /// Searches for a trailer on the configured YouTube channel.
-    /// Returns the single best match.
-    /// </summary>
-    Task<TrailerResult> GetTrailerAsync(
-        string movieName,
-        int? year,
-        string apiKey,
-        string channelHandle,
-        CancellationToken cancellationToken);
-
-    /// <summary>
     /// Performs a general YouTube search for trailers and returns multiple results
     /// so the user can pick which one to watch.
     /// </summary>

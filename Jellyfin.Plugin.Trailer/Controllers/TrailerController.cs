@@ -4,7 +4,6 @@ using System.ComponentModel.DataAnnotations;
 using System.Net.Http;
 using System.Net.Mime;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.Trailer.Models;
@@ -24,6 +23,17 @@ namespace Jellyfin.Plugin.Trailer.Controllers;
 [Produces(MediaTypeNames.Application.Json)]
 public class TrailerController : ControllerBase
 {
+    /// <summary>Invidious instances used for stream resolution and whitelisted in the proxy.</summary>
+    private static readonly string[] InvidiousHosts =
+    {
+        "https://inv.nadeko.net",
+        "https://invidious.nerdvpn.de",
+        "https://yewtu.be"
+    };
+
+    private const string DesktopUserAgent =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
     private readonly ITrailerService _trailerService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<TrailerController> _logger;
@@ -37,62 +47,6 @@ public class TrailerController : ControllerBase
         _trailerService = trailerService;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
-    }
-
-    /// <summary>
-    /// Returns public plugin configuration consumed by the client-side JavaScript.
-    /// Exposes only settings that are safe to read without admin rights.
-    /// </summary>
-    /// <response code="200">Configuration returned.</response>
-    /// <response code="401">Authentication required.</response>
-    [HttpGet("config")]
-    [Authorize]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public ActionResult GetClientConfig()
-    {
-        var config = Plugin.Instance!.Configuration;
-        return Ok(new { playerMode = config.PlayerMode });
-    }
-
-    /// <summary>
-    /// Returns the trailer URL for the specified Jellyfin library item.
-    /// </summary>
-    /// <remarks>
-    /// Called by <c>trailerPlugin.js</c> as <c>GET /Trailer/{itemId}</c>.
-    ///
-    /// The response always has HTTP 200; use the <c>found</c> field to check
-    /// whether a trailer was actually resolved.
-    /// </remarks>
-    /// <param name="itemId">Jellyfin item GUID (e.g. <c>3fa85f64-5717-4562-b3fc-2c963f66afa6</c>).</param>
-    /// <param name="cancellationToken">Cancellation token injected by ASP.NET Core.</param>
-    /// <returns>
-    /// A <see cref="TrailerResult"/> with <c>found=true</c> and a YouTube URL,
-    /// or <c>found=false</c> when no trailer is available.
-    /// </returns>
-    /// <response code="200">Trailer lookup completed (may have found=false).</response>
-    /// <response code="400">The provided item ID is not a valid GUID.</response>
-    /// <response code="401">Authentication required.</response>
-    [HttpGet("{itemId}")]
-    [Authorize]
-    [ProducesResponseType(typeof(TrailerResult), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<TrailerResult>> GetTrailerAsync(
-        [FromRoute][Required] string itemId,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(itemId))
-            return BadRequest("itemId is required");
-
-        _logger.LogDebug("Trailer requested for item {ItemId}", itemId);
-
-        var result = await _trailerService.GetTrailerAsync(itemId, cancellationToken)
-            .ConfigureAwait(false);
-
-        // Always return 200 so the JS can distinguish
-        //   found=false (trailer unavailable)  vs  network/HTTP errors.
-        return Ok(result);
     }
 
     /// <summary>
@@ -151,6 +105,7 @@ public class TrailerController : ControllerBase
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
+            HttpContext.Response.RegisterForDispose(response);
 
             if (!response.IsSuccessStatusCode)
                 return StatusCode(502, "Upstream returned " + (int)response.StatusCode);
@@ -186,7 +141,7 @@ public class TrailerController : ControllerBase
         [FromRoute][Required] string videoId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(videoId) || videoId.Length != 11)
+        if (!IsValidVideoId(videoId))
             return BadRequest("Valid 11-character YouTube video ID is required");
 
         // ── Strategy 1: Scrape YouTube watch page (most reliable, like yt-dlp) ──
@@ -219,7 +174,7 @@ public class TrailerController : ControllerBase
         [FromRoute][Required] string videoId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(videoId) || videoId.Length != 11)
+        if (!IsValidVideoId(videoId))
             return BadRequest("Valid 11-character YouTube video ID is required");
 
         var results = new Dictionary<string, object?>();
@@ -227,12 +182,12 @@ public class TrailerController : ControllerBase
         // Test watch page scrape
         try
         {
-            var client = _httpClientFactory.CreateClient("TrailerProxy");
+            var client = _httpClientFactory.CreateClient("YouTubeResolve");
             using var req = new HttpRequestMessage(HttpMethod.Get, $"https://www.youtube.com/watch?v={videoId}");
-            req.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            req.Headers.Add("User-Agent", DesktopUserAgent);
             req.Headers.Add("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8");
 
-            var resp = await client.SendAsync(req, cancellationToken).ConfigureAwait(false);
+            using var resp = await client.SendAsync(req, cancellationToken).ConfigureAwait(false);
             var html = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
             var playerJson = ExtractPlayerResponse(html);
@@ -278,17 +233,15 @@ public class TrailerController : ControllerBase
         {
             try
             {
-                var client = _httpClientFactory.CreateClient("TrailerProxy");
+                var client = _httpClientFactory.CreateClient("YouTubeResolve");
                 var payload = BuildPlayerPayload(videoId, clientName, clientName == "ANDROID" ? "19.09.37" : "2.0");
                 using var req = new HttpRequestMessage(HttpMethod.Post, "https://www.youtube.com/youtubei/v1/player")
                 {
                     Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json")
                 };
-                req.Headers.Add("User-Agent", clientName == "ANDROID"
-                    ? "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
-                    : "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 Chrome/79.0.3945.130 Safari/537.36");
+                req.Headers.Add("User-Agent", UserAgentFor(clientName));
 
-                var resp = await client.SendAsync(req, cancellationToken).ConfigureAwait(false);
+                using var resp = await client.SendAsync(req, cancellationToken).ConfigureAwait(false);
                 var json = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
                 if (resp.IsSuccessStatusCode)
@@ -320,17 +273,17 @@ public class TrailerController : ControllerBase
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("TrailerProxy");
+            var client = _httpClientFactory.CreateClient("YouTubeResolve");
 
             var watchUrl = $"https://www.youtube.com/watch?v={videoId}";
             using var request = new HttpRequestMessage(HttpMethod.Get, watchUrl);
-            request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            request.Headers.Add("User-Agent", DesktopUserAgent);
             request.Headers.Add("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8");
             request.Headers.Add("Accept", "text/html,application/xhtml+xml");
 
             _logger.LogInformation("Scraping YouTube watch page for {VideoId}", videoId);
 
-            var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("YouTube watch page returned {Status} for {VideoId}", (int)response.StatusCode, videoId);
@@ -361,26 +314,18 @@ public class TrailerController : ControllerBase
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("TrailerProxy");
+            var client = _httpClientFactory.CreateClient("YouTubeResolve");
 
             var payload = BuildPlayerPayload(videoId, clientName, clientVersion);
             using var request = new HttpRequestMessage(HttpMethod.Post, "https://www.youtube.com/youtubei/v1/player")
             {
                 Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json")
             };
-
-            // Use appropriate User-Agent for each client
-            var ua = clientName switch
-            {
-                "ANDROID" => "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
-                "TVHTML5_SIMPLY_EMBEDDED_PLAYER" => "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 Chrome/79.0.3945.130 Safari/537.36",
-                _ => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
-            };
-            request.Headers.Add("User-Agent", ua);
+            request.Headers.Add("User-Agent", UserAgentFor(clientName));
 
             _logger.LogInformation("Trying YouTube player API ({Client}) for {VideoId}", clientName, videoId);
 
-            var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("YouTube player API ({Client}) returned {Status}", clientName, (int)response.StatusCode);
@@ -397,6 +342,13 @@ public class TrailerController : ControllerBase
 
         return null;
     }
+
+    private static string UserAgentFor(string clientName) => clientName switch
+    {
+        "ANDROID" => "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip",
+        "TVHTML5_SIMPLY_EMBEDDED_PLAYER" => "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 Chrome/79.0.3945.130 Safari/537.36",
+        _ => DesktopUserAgent
+    };
 
     private static string BuildPlayerPayload(string videoId, string clientName, string clientVersion)
     {
@@ -504,60 +456,26 @@ public class TrailerController : ControllerBase
             return null;
         }
 
-        string? bestUrl = null;
-        string? bestQuality = null;
-
         // formats = muxed audio+video (ready for <video>)
         if (streamingData.TryGetProperty("formats", out var formats))
         {
-            foreach (var fmt in formats.EnumerateArray())
+            var (bestUrl, bestQuality) = PickBestMuxed(formats);
+            if (!string.IsNullOrEmpty(bestUrl))
             {
-                // Direct URL (no signature cipher)
-                var url = fmt.TryGetProperty("url", out var u) ? u.GetString() : null;
-                if (string.IsNullOrEmpty(url))
-                {
-                    // signatureCipher requires JS player to decode — skip for now
-                    if (fmt.TryGetProperty("signatureCipher", out _))
-                    {
-                        _logger.LogInformation("{Source}: format has signatureCipher, skipping", source);
-                    }
-                    continue;
-                }
-
-                var quality = fmt.TryGetProperty("qualityLabel", out var q) ? q.GetString() : "";
-                var mimeType = fmt.TryGetProperty("mimeType", out var m) ? m.GetString() : "";
-
-                if (bestUrl == null || (quality != null && quality.Contains("720")))
-                {
-                    bestUrl = url;
-                    bestQuality = quality;
-                }
+                _logger.LogInformation("{Source}: resolved {Quality} for {VideoId}", source, bestQuality, videoId);
+                return BuildProxyResult(bestUrl, bestQuality, source);
             }
         }
 
-        if (!string.IsNullOrEmpty(bestUrl))
-        {
-            _logger.LogInformation("{Source}: resolved {Quality} for {VideoId}", source, bestQuality, videoId);
-            var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(bestUrl);
-            return new { streamUrl = proxyUrl, quality = bestQuality, source };
-        }
-
-        _logger.LogWarning("{Source}: no usable muxed formats for {VideoId}", source, videoId);
+        _logger.LogWarning("{Source}: no usable muxed formats for {VideoId} (likely signatureCipher-only)", source, videoId);
         return null;
     }
 
     private async Task<object?> TryInvidiousApi(string videoId, CancellationToken ct)
     {
-        string[] hosts =
-        {
-            "https://inv.nadeko.net",
-            "https://invidious.nerdvpn.de",
-            "https://yewtu.be"
-        };
+        var client = _httpClientFactory.CreateClient("YouTubeResolve");
 
-        var client = _httpClientFactory.CreateClient("TrailerProxy");
-
-        foreach (var host in hosts)
+        foreach (var host in InvidiousHosts)
         {
             try
             {
@@ -566,9 +484,9 @@ public class TrailerController : ControllerBase
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, apiUrl);
                 request.Headers.Add("Accept", "application/json");
-                request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36");
+                request.Headers.Add("User-Agent", DesktopUserAgent);
 
-                var response = await client.SendAsync(request, ct).ConfigureAwait(false);
+                using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Invidious {Host} returned {Status}", host, (int)response.StatusCode);
@@ -580,29 +498,12 @@ public class TrailerController : ControllerBase
 
                 if (doc.RootElement.TryGetProperty("formatStreams", out var streams))
                 {
-                    string? bestUrl = null;
-                    string? bestQuality = null;
-
-                    foreach (var stream in streams.EnumerateArray())
-                    {
-                        var url = stream.TryGetProperty("url", out var u) ? u.GetString() : null;
-                        if (string.IsNullOrEmpty(url)) continue;
-
-                        var quality = stream.TryGetProperty("qualityLabel", out var q) ? q.GetString() : "";
-
-                        if (bestUrl == null || (quality != null && quality.Contains("720")))
-                        {
-                            bestUrl = url;
-                            bestQuality = quality;
-                        }
-                    }
-
+                    var (bestUrl, bestQuality) = PickBestMuxed(streams);
                     if (!string.IsNullOrEmpty(bestUrl))
                     {
                         _logger.LogInformation("Invidious resolved {Quality} for {VideoId} via {Host}",
                             bestQuality, videoId, host);
-                        var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(bestUrl);
-                        return new { streamUrl = proxyUrl, quality = bestQuality, source = host };
+                        return BuildProxyResult(bestUrl, bestQuality, host);
                     }
                 }
             }
@@ -616,8 +517,66 @@ public class TrailerController : ControllerBase
     }
 
     /// <summary>
+    /// Picks the highest-resolution muxed format that carries a direct URL
+    /// (skips signatureCipher-only formats). Works for both YouTube
+    /// <c>streamingData.formats</c> and Invidious <c>formatStreams</c>.
+    /// </summary>
+    private static (string? Url, string? Quality) PickBestMuxed(JsonElement formats)
+    {
+        string? bestUrl = null;
+        string? bestQuality = null;
+        int bestRes = -1;
+
+        foreach (var fmt in formats.EnumerateArray())
+        {
+            if (!fmt.TryGetProperty("url", out var u) || u.ValueKind != JsonValueKind.String)
+                continue;
+
+            var url = u.GetString();
+            if (string.IsNullOrEmpty(url))
+                continue;
+
+            var quality = fmt.TryGetProperty("qualityLabel", out var q) && q.ValueKind == JsonValueKind.String
+                ? q.GetString()
+                : null;
+
+            var res = ParseResolution(quality);
+            if (res > bestRes)
+            {
+                bestRes = res;
+                bestUrl = url;
+                bestQuality = quality;
+            }
+        }
+
+        return (bestUrl, bestQuality);
+    }
+
+    /// <summary>Parses the leading number from a quality label like "720p" → 720. Returns 0 if none.</summary>
+    private static int ParseResolution(string? qualityLabel)
+    {
+        if (string.IsNullOrEmpty(qualityLabel))
+            return 0;
+
+        int i = 0;
+        while (i < qualityLabel.Length && char.IsDigit(qualityLabel[i]))
+            i++;
+
+        return i > 0 && int.TryParse(qualityLabel.AsSpan(0, i), out var n) ? n : 0;
+    }
+
+    private static object BuildProxyResult(string directUrl, string? quality, string source)
+    {
+        var proxyUrl = "/Trailer/proxy?url=" + Uri.EscapeDataString(directUrl);
+        return new { streamUrl = proxyUrl, quality, source };
+    }
+
+    private static bool IsValidVideoId(string videoId) =>
+        !string.IsNullOrWhiteSpace(videoId) && videoId.Length == 11;
+
+    /// <summary>
     /// Proxies a remote video URL through the Jellyfin server.
-    /// Used when direct browser access to the video host is blocked (e.g. Yandex S3).
+    /// Used when direct browser access to the video host is blocked (e.g. DNS filtering).
     /// The server fetches the video and streams it to the client.
     /// </summary>
     /// <param name="url">The remote video URL to proxy.</param>
@@ -641,63 +600,80 @@ public class TrailerController : ControllerBase
         if (uri.Scheme != "http" && uri.Scheme != "https")
             return BadRequest("Only http/https URLs are supported");
 
-        // Restrict to YouTube/Google video domains to prevent open proxy abuse
-        var host = uri.Host;
-        if (!host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase)
-            && !host.EndsWith(".youtube.com", StringComparison.OrdinalIgnoreCase)
-            && !host.EndsWith(".ytimg.com", StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest("Only YouTube/Google video URLs are allowed");
-        }
+        // Restrict to known video hosts to prevent open proxy abuse
+        if (!IsAllowedProxyHost(uri))
+            return BadRequest("URL host is not allowed");
 
-        _logger.LogInformation("Proxying video: {Url}", url);
+        _logger.LogInformation("Proxying video: {Host}{Path}", uri.Host, uri.AbsolutePath);
 
         try
         {
             var client = _httpClientFactory.CreateClient("TrailerProxy");
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            request.Headers.Add("User-Agent", DesktopUserAgent);
 
             // Forward Range header for video seeking support
-            if (Request.Headers.ContainsKey("Range"))
+            if (Request.Headers.TryGetValue("Range", out var range))
             {
-                request.Headers.TryAddWithoutValidation("Range", Request.Headers["Range"].ToString());
+                request.Headers.TryAddWithoutValidation("Range", range.ToString());
             }
 
             var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
+            HttpContext.Response.RegisterForDispose(response);
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Proxy upstream returned HTTP {Status} for {Url}", (int)response.StatusCode, url);
+                _logger.LogWarning("Proxy upstream returned HTTP {Status} for {Host}", (int)response.StatusCode, uri.Host);
                 return StatusCode(502, "Upstream server returned " + (int)response.StatusCode);
             }
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "video/mp4";
             var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
-            // Forward content range headers for seeking
+            // Pass upstream range/length metadata straight through. The upstream already
+            // honoured the forwarded Range header, so we must NOT let ASP.NET re-slice the
+            // (non-seekable) stream — hence enableRangeProcessing stays off.
             if (response.Content.Headers.ContentRange != null)
-            {
                 Response.Headers["Content-Range"] = response.Content.Headers.ContentRange.ToString();
-            }
             if (response.Headers.Contains("Accept-Ranges"))
-            {
                 Response.Headers["Accept-Ranges"] = "bytes";
-            }
 
-            var statusCode = (int)response.StatusCode;
-            Response.StatusCode = statusCode;
-            return File(stream, contentType, enableRangeProcessing: true);
+            Response.StatusCode = (int)response.StatusCode;
+            return File(stream, contentType);
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "Proxy HTTP error for {Url}", url);
+            _logger.LogError(ex, "Proxy HTTP error for {Host}", uri.Host);
             return StatusCode(502, "Failed to fetch upstream video");
         }
         catch (TaskCanceledException)
         {
             return StatusCode(504, "Upstream request timed out");
         }
+    }
+
+    /// <summary>Whitelist of hosts the video proxy may fetch from.</summary>
+    private static bool IsAllowedProxyHost(Uri uri)
+    {
+        var host = uri.Host;
+        if (host.EndsWith(".googlevideo.com", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".youtube.com", StringComparison.OrdinalIgnoreCase)
+            || host.EndsWith(".ytimg.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Invidious instances may return stream URLs pointing at their own domain.
+        foreach (var invidious in InvidiousHosts)
+        {
+            if (Uri.TryCreate(invidious, UriKind.Absolute, out var invUri)
+                && string.Equals(host, invUri.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

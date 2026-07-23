@@ -39,7 +39,7 @@ public class Plugin : BasePlugin<Configuration.PluginConfiguration>, IHasWebPage
     public override Guid Id => StaticId;
 
     /// <inheritdoc />
-    public override string Description => "Adds a Трейлер button to movie pages using TMDb and Kinopoisk APIs.";
+    public override string Description => "Adds a Трейлер button to movie pages that searches YouTube for trailers.";
 
     /// <summary>
     /// Returns web pages served by this plugin.
