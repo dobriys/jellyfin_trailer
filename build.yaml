@@ -4,7 +4,7 @@
 
 name:     "Trailer"
 guid:     "70788050-9f96-453d-a823-f41b7bd12712"
-version:  "1.0.0.0"
+version:  "1.0.25.0"
 
 # Minimum Jellyfin server version this plugin is compatible with.
 # Must match the Jellyfin.Controller NuGet version used in the .csproj.
@@ -16,19 +16,11 @@ overview: "Кнопка «Трейлер» на страницах фильмо�
 
 description: |
   Добавляет кнопку «Трейлер» на страницу каждого фильма в вашей библиотеке.
-  Трейлер воспроизводится во встроенном плеере прямо в интерфейсе Jellyfin
-  (или в новой вкладке — на ваш выбор).
-
-  Источники трейлеров:
-    • TMDb (themoviedb.org) — основной источник, поддержка русского и английского языков
-    • Kinopoisk Unofficial API — запасной вариант для российских фильмов
+  По клику открывается список найденных на YouTube трейлеров, выбранный
+  воспроизводится во встроенном плеере прямо в интерфейсе Jellyfin.
 
   Настройки:
-    • TMDb API Key (v3)
-    • Kinopoisk Unofficial API Key
-    • Предпочтительный язык трейлера
-    • Режим воспроизведения: встроенный плеер или новая вкладка
-    • Кэширование результатов
+    • YouTube Data API v3 Key
 
 category: "General"
 owner:    "dobriys"
@@ -36,4 +28,4 @@ owner:    "dobriys"
 artifacts:
   - "Jellyfin.Plugin.Trailer.dll"
 
-changelog: "Initial release — встроенный YouTube плеер в Jellyfin"
+changelog: "v1.0.25.0: удалён неиспользуемый TMDb/Kinopoisk-код, таймауты HTTP, фикс Invidious-фолбэка и выбора качества, устранена утечка в прокси"
