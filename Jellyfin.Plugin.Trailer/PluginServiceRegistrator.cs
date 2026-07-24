@@ -1,5 +1,4 @@
 using System;
-using System.Threading;
 using Jellyfin.Plugin.Trailer.Services;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
@@ -19,16 +18,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // Named HttpClient instances managed by Jellyfin's IHttpClientFactory.
         // Using named clients avoids socket exhaustion from ad-hoc HttpClient instantiation.
 
-        // YouTube Data API — short timeout, calls should be quick.
+        // YouTube Data API — search calls should be quick.
         serviceCollection.AddHttpClient("YouTube", c => c.Timeout = TimeSpan.FromSeconds(15));
 
-        // Stream resolution (watch-page scrape, player API, Invidious). Bounded so a slow
-        // upstream can't stall the whole request chain (several are tried sequentially).
-        serviceCollection.AddHttpClient("YouTubeResolve", c => c.Timeout = TimeSpan.FromSeconds(12));
-
-        // Video/thumbnail streaming proxy. No client timeout — long trailers can exceed the
-        // default 100s; the request's CancellationToken bounds the lifetime instead.
-        serviceCollection.AddHttpClient("TrailerProxy", c => c.Timeout = Timeout.InfiniteTimeSpan);
+        // Thumbnail proxy — small images, short timeout is plenty.
+        serviceCollection.AddHttpClient("TrailerProxy", c => c.Timeout = TimeSpan.FromSeconds(15));
 
         // Trailer providers and service
         serviceCollection.AddSingleton<IYouTubeTrailerProvider, YouTubeTrailerProvider>();

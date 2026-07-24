@@ -1,5 +1,5 @@
 /**
- * Jellyfin Trailer Plugin — Client Side  v3.2
+ * Jellyfin Trailer Plugin — Client Side  v3.3
  *
  * Injects a "Трейлер" button on movie detail pages.
  * Clicking the button opens a modal with YouTube search results.
@@ -8,8 +8,8 @@
  * Flow:
  *   1. Button click → GET /Trailer/{itemId}/search → list of YouTube results
  *   2. Modal shows scrollable list with thumbnails, titles, channel names
- *   3. User clicks a result → YouTube embed (youtube-nocookie, no origin param)
- *   4. If embed fails → "Открыть на YouTube" fallback link
+ *   3. User clicks a result → YouTube embed (youtube-nocookie.com/embed, no origin param)
+ *   4. If the video is embed-disabled → "Открыть на YouTube" fallback link below
  */
 (function () {
   'use strict';
@@ -262,8 +262,7 @@
 
   /**
    * Switch the modal to the video player.
-   * Resolves stream URL via server (watch page scrape / player API / Invidious),
-   * then plays via HTML5 <video> through /Trailer/proxy.
+   * Plays the trailer via a youtube-nocookie.com iframe embed (no origin param).
    */
   function showPlayer(contentArea, panel, header, allItems, selectedItem) {
     // Widen the panel for the player
@@ -292,11 +291,16 @@
     var playerWrap = document.createElement('div');
     playerWrap.className = 'trailer-player-wrap';
 
-    // Loading indicator
-    var loadingEl = document.createElement('div');
-    loadingEl.className = 'trailer-modal-loading';
-    loadingEl.textContent = 'Загрузка видео...';
-    playerWrap.appendChild(loadingEl);
+    // YouTube embed via privacy-enhanced domain. NO origin param (that caused Error 153).
+    var iframe = document.createElement('iframe');
+    iframe.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(selectedItem.videoId) +
+                 '?autoplay=1&rel=0&modestbranding=1';
+    iframe.style.cssText = 'width:100%;height:100%;border:0;display:block;background:#000;';
+    iframe.title = selectedItem.title || 'Трейлер';
+    iframe.setAttribute('allow', 'accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen');
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    playerWrap.appendChild(iframe);
 
     // Now playing title
     var nowPlaying = document.createElement('div');
@@ -322,50 +326,6 @@
     contentArea.appendChild(nowPlaying);
     contentArea.appendChild(channelInfo);
     contentArea.appendChild(fallback);
-
-    // ── Resolve stream via server ──
-    var auth = getAuthHeader();
-    if (!auth) {
-      loadingEl.textContent = 'Нет токена авторизации';
-      return;
-    }
-
-    fetch(API_PATH + 'stream/' + selectedItem.videoId, { headers: { 'Authorization': auth } })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (data) {
-        if (!data || !data.streamUrl) throw new Error('No stream URL');
-        console.log('[TrailerPlugin] Stream resolved: ' + data.quality + ' via ' + data.source);
-
-        playerWrap.innerHTML = '';
-
-        var video = document.createElement('video');
-        video.controls = true;
-        video.autoplay = true;
-        video.style.cssText = 'width:100%;height:100%;display:block;background:#000;';
-        video.title = selectedItem.title || 'Трейлер';
-        video.src = data.streamUrl;
-
-        video.addEventListener('error', function () {
-          console.warn('[TrailerPlugin] HTML5 video error');
-          playerWrap.innerHTML = '';
-          var errMsg = document.createElement('div');
-          errMsg.className = 'trailer-modal-empty';
-          errMsg.innerHTML = 'Не удалось воспроизвести.<br><a href="' +
-            (selectedItem.videoUrl || 'https://www.youtube.com/watch?v=' + selectedItem.videoId) +
-            '" target="_blank" rel="noopener" style="color:#6cf">Открыть на YouTube \u2197</a>';
-          playerWrap.appendChild(errMsg);
-        });
-
-        playerWrap.appendChild(video);
-      })
-      .catch(function (err) {
-        console.error('[TrailerPlugin] Stream error:', err);
-        loadingEl.textContent = 'Не удалось получить видео.';
-        loadingEl.style.color = '#e74c3c';
-      });
   }
 
   // ── Button ─────────────────────────────────────────────────────────────────
@@ -512,6 +472,6 @@
 
   onMaybeNavigated();
 
-  console.log('[TrailerPlugin] Loaded v3.2 — server-side stream (watch page scrape + player API)');
+  console.log('[TrailerPlugin] Loaded v3.3 — YouTube nocookie iframe embed');
 
 })();

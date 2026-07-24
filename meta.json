@@ -1,12 +1,12 @@
 {
   "guid": "70788050-9f96-453d-a823-f41b7bd12712",
   "name": "Trailer",
-  "description": "Adds a Трейлер button to movie detail pages that searches YouTube for trailers and plays the selected one in an embedded player.",
+  "description": "Adds a Трейлер button to movie detail pages that searches YouTube for trailers and plays the selected one via an embedded YouTube player.",
   "overview": "Shows a Трейлер button on movie pages that searches YouTube for trailers.",
   "owner": "jellyfin-trailer",
   "category": "General",
-  "version": "1.0.25.0",
+  "version": "1.0.26.0",
   "targetAbi": "10.10.0.0",
-  "changelog": "v1.0.25.0: removed unused TMDb/Kinopoisk code, HTTP timeouts, Invidious fallback + quality selection fixes, proxy resource-leak fix.",
+  "changelog": "v1.0.26.0: playback via YouTube iframe embed (reliably plays any trailer); removed server-side stream resolver and video proxy.",
   "imageUrl": ""
 }

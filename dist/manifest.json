@@ -9,6 +9,14 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "1.0.26.0",
+        "checksum": "d593b920168c02e50f9b8f544580205c",
+        "changelog": "v1.0.26.0: воспроизведение через YouTube iframe-embed (надёжно играет любой трейлер), удалён серверный резолвер потока и видео-прокси",
+        "targetAbi": "10.10.0.0",
+        "sourceUrl": "https://github.com/dobriys/jellyfin_trailer/releases/download/v1.0.26.0/Jellyfin.Plugin.Trailer_1.0.26.0.zip",
+        "timestamp": "2026-07-24T08:03:38Z"
+      },
+      {
         "version": "1.0.25.0",
         "checksum": "b39a2f6569e90608181f18290661e1c4",
         "changelog": "v1.0.25.0: удалён неиспользуемый TMDb/Kinopoisk-код, таймауты HTTP, фикс Invidious-фолбэка и выбора качества, устранена утечка в прокси",
