@@ -242,9 +242,6 @@ Movies are matched by **title and year** from Jellyfin metadata — no separate 
 
 ### Via plugin repository
 
-Works only when this repository and its releases are **public** (Jellyfin downloads the
-`.zip` from the manifest URL without authentication).
-
 1. Open **Dashboard → Plugins → Repositories**.
 2. Click **+** and add the repository URL:
 
