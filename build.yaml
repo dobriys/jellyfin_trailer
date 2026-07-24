@@ -4,7 +4,7 @@
 
 name:     "Trailer"
 guid:     "70788050-9f96-453d-a823-f41b7bd12712"
-version:  "1.0.26.0"
+version:  "1.0.27.0"
 
 # Minimum Jellyfin server version this plugin is compatible with.
 # Must match the Jellyfin.Controller NuGet version used in the .csproj.
@@ -28,4 +28,4 @@ owner:    "dobriys"
 artifacts:
   - "Jellyfin.Plugin.Trailer.dll"
 
-changelog: "v1.0.26.0: воспроизведение через YouTube iframe-embed (надёжно играет любой трейлер), удалён серверный резолвер потока и видео-прокси"
+changelog: "v1.0.27.0: укреплено сохранение настроек (единый ключ, без дублей регистра)"

@@ -117,26 +117,19 @@
   var TrailerPluginConfig = {
     pluginId: '70788050-9f96-453d-a823-f41b7bd12712',
 
-    /** Case-insensitive property getter — works with both camelCase and PascalCase */
-    get: function (config, name) {
-      if (config[name] !== undefined) return config[name];
-      var lower = name.charAt(0).toLowerCase() + name.slice(1);
-      if (config[lower] !== undefined) return config[lower];
-      var upper = name.charAt(0).toUpperCase() + name.slice(1);
-      return config[upper];
-    },
-
-    /** Set property in both cases so server always picks it up */
-    set: function (config, name, value) {
-      config[name] = value;
-      config[name.charAt(0).toLowerCase() + name.slice(1)] = value;
-      config[name.charAt(0).toUpperCase() + name.slice(1)] = value;
+    /** Reads the key case-insensitively (server may return camelCase or PascalCase). */
+    readKey: function (config) {
+      var found = '';
+      Object.keys(config || {}).forEach(function (k) {
+        if (k.toLowerCase() === 'youtubeapikey') found = config[k];
+      });
+      return found;
     },
 
     loadConfiguration: function () {
       var self = TrailerPluginConfig;
       ApiClient.getPluginConfiguration(self.pluginId).then(function (config) {
-        document.getElementById('YouTubeApiKey').value = self.get(config, 'YouTubeApiKey') || '';
+        document.getElementById('YouTubeApiKey').value = self.readKey(config) || '';
       }).catch(function (e) {
         console.error('[TrailerPlugin] load error', e);
       });
@@ -150,9 +143,18 @@
       btn.textContent = 'Сохранение...';
 
       ApiClient.getPluginConfiguration(self.pluginId).then(function (config) {
-        self.set(config, 'YouTubeApiKey', document.getElementById('YouTubeApiKey').value.trim());
+        var val = document.getElementById('YouTubeApiKey').value.trim();
+        // Strip any case-variant of the key first so the posted JSON carries a single
+        // YouTubeApiKey property — duplicate case-variants can break server-side binding.
+        Object.keys(config).forEach(function (k) {
+          if (k.toLowerCase() === 'youtubeapikey') delete config[k];
+        });
+        config.YouTubeApiKey = val;
         return ApiClient.updatePluginConfiguration(self.pluginId, config);
-      }).then(function () {
+      }).then(function (result) {
+        if (window.Dashboard && Dashboard.processPluginConfigurationUpdateResult) {
+          Dashboard.processPluginConfigurationUpdateResult(result);
+        }
         btn.disabled = false;
         btn.textContent = 'Сохранить';
         status.textContent = '✓ Настройки сохранены';

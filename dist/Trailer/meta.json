@@ -5,8 +5,8 @@
   "overview": "Shows a Трейлер button on movie pages that searches YouTube for trailers.",
   "owner": "jellyfin-trailer",
   "category": "General",
-  "version": "1.0.26.0",
+  "version": "1.0.27.0",
   "targetAbi": "10.10.0.0",
-  "changelog": "v1.0.26.0: playback via YouTube iframe embed (reliably plays any trailer); removed server-side stream resolver and video proxy.",
+  "changelog": "v1.0.27.0: harden settings save (single config key, no case-variant duplicates).",
   "imageUrl": ""
 }
